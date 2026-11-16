@@ -984,3 +984,16 @@ pub fn chase(c: &Card, x0: f32, head: f32, y: f32, thick: f32, tint: Color32, ho
     }
     c.painter.add(egui::Shape::mesh(mesh));
 }
+
+/// 用户提供的第三方待办提醒图标：绿色圆角文档，右下角时钟徽章。
+pub fn todo_nudge_icon(c: &Card, x: f32, y: f32, size: f32) {
+    let rect = c.rect(x - size / 2.0, y - size / 2.0, size, size);
+    let icon = egui::include_image!("../assets/todo-nudge.svg");
+    let egui::ImageSource::Bytes { uri, bytes } = icon else { return; };
+    let pixels = (rect.width() * c.ui.ctx().pixels_per_point()).ceil() as u32;
+    let icon = egui::Image::from_bytes(format!("{uri}/{pixels}.svg"), bytes);
+    if let Ok(egui::load::TexturePoll::Ready { texture }) = icon.fit_to_exact_size(rect.size()).load_for_size(c.ui.ctx(), rect.size()) {
+        c.painter.image(texture.id, rect, Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+    }
+}
+

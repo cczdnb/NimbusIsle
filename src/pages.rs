@@ -53,9 +53,16 @@ const REMOTE_TODO_LIST_BOTTOM: f32 = crate::app::REMOTE_TODO_H - 20.0;
 const REMOTE_TODO_HEADER_H: f32 = 14.0;
 const REMOTE_TODO_LINE_H: f32 = 13.5;
 const REMOTE_TODO_TITLE_W: f32 = 252.0;
+const REMOTE_TODO_EXPAND_H: f32 = 20.0;
 
-/// 从 `first` 起，当前屏实际能放下的事项数（随换行与分组标题变化，不是固定 1 或 6）。
-fn remote_todo_visible_count(c: &Card, items: &[crate::todo_sync::RemoteItem], order: &[usize], first: usize) -> usize {
+fn remote_todo_row_h(c: &Card, item: &crate::todo_sync::RemoteItem, expanded: bool) -> f32 {
+    let nlines = c.wrap(&item.summary, 11.0, if item.done { W::Regular } else { W::Semibold }, REMOTE_TODO_TITLE_W, usize::MAX).len();
+    let row_h = 4.0 + nlines as f32 * REMOTE_TODO_LINE_H + 4.0;
+    if expanded { row_h + REMOTE_TODO_EXPAND_H } else { row_h }
+}
+
+/// 从 `first` 起，当前屏实际能放下的事项数（随换行、展开行与分组标题变化，不是固定 1 或 6）。
+fn remote_todo_visible_count(c: &Card, items: &[crate::todo_sync::RemoteItem], order: &[usize], first: usize, focus: Option<&str>) -> usize {
     if first >= order.len() { return 0; }
     let mut y = REMOTE_TODO_LIST_TOP;
     let mut last_bucket = None;
@@ -64,8 +71,7 @@ fn remote_todo_visible_count(c: &Card, items: &[crate::todo_sync::RemoteItem], o
         let item = &items[idx];
         let need_header = last_bucket != Some(item.bucket);
         let header_h = if need_header { REMOTE_TODO_HEADER_H } else { 0.0 };
-        let nlines = c.wrap(&item.summary, 11.0, if item.done { W::Regular } else { W::Semibold }, REMOTE_TODO_TITLE_W, usize::MAX).len();
-        let row_h = 4.0 + nlines as f32 * REMOTE_TODO_LINE_H + 4.0;
+        let row_h = remote_todo_row_h(c, item, focus == Some(item.done_key().as_str()));
         let block_h = header_h + row_h;
         if y + block_h > REMOTE_TODO_LIST_BOTTOM && count > 0 { break; }
         y += block_h;
@@ -75,12 +81,12 @@ fn remote_todo_visible_count(c: &Card, items: &[crate::todo_sync::RemoteItem], o
     count
 }
 
-fn remote_todo_page_starts(c: &Card, items: &[crate::todo_sync::RemoteItem], order: &[usize]) -> Vec<usize> {
+fn remote_todo_page_starts(c: &Card, items: &[crate::todo_sync::RemoteItem], order: &[usize], focus: Option<&str>) -> Vec<usize> {
     let mut starts = Vec::new();
     let mut i = 0;
     while i < order.len() {
         starts.push(i);
-        let n = remote_todo_visible_count(c, items, order, i);
+        let n = remote_todo_visible_count(c, items, order, i, focus);
         if n == 0 { break; }
         i += n;
     }
@@ -1156,10 +1162,13 @@ impl App {
         let (rd, rs, rn, rl) = self.todo_sync.open_count();
         let order = self.todo_sync.display_items();
         let total = order.len();
-        let starts = remote_todo_page_starts(c, &self.todo_sync.items, &order);
-        if self.remote_todo_first >= total { self.remote_todo_first = total.saturating_sub(1); }
+        let focus_key = self.remote_todo_focus.clone();
+        let starts = remote_todo_page_starts(c, &self.todo_sync.items, &order, focus_key.as_deref());
+        if self.remote_todo_first >= total { self.remote_todo_first = total.saturating_sub(1); self.remote_todo_keep_first = false; }
         let mut page_idx = starts.iter().rposition(|&s| s <= self.remote_todo_first).unwrap_or(0);
-        if let Some(&start) = starts.get(page_idx) { self.remote_todo_first = start; }
+        if !self.remote_todo_keep_first {
+            if let Some(&start) = starts.get(page_idx) { self.remote_todo_first = start; }
+        }
         if total > 0 {
             c.text(28.0, 42.0, &format!("到期{rd} · 即将{rs} · 未排期{rn} · 其他{rl}"), size::SMALL, W::Regular, theme::GRAY, H::Left);
         }
@@ -1168,12 +1177,19 @@ impl App {
         let up = c.hit(268.0, 34.0, 48.0, 20.0, "remote-todo-up").on_hover_text("上一页");
         let down = c.hit(344.0, 34.0, 48.0, 20.0, "remote-todo-down").on_hover_text("下一页");
         if up.clicked() && page_idx > 0 {
+            self.remote_todo_keep_first = false;
             page_idx -= 1;
             self.remote_todo_first = starts[page_idx];
         }
-        if down.clicked() && pages > 0 && page_idx + 1 < pages {
-            page_idx += 1;
-            self.remote_todo_first = starts[page_idx];
+        if down.clicked() {
+            self.remote_todo_keep_first = false;
+            if let Some(&next) = starts.iter().find(|&&s| s > self.remote_todo_first) {
+                self.remote_todo_first = next;
+                page_idx = starts.iter().position(|&s| s == next).unwrap_or(page_idx + 1);
+            } else if pages > 0 && page_idx + 1 < pages {
+                page_idx += 1;
+                self.remote_todo_first = starts[page_idx];
+            }
         }
         let first = self.remote_todo_first;
         let can_up = page_idx > 0;
@@ -1212,7 +1228,8 @@ impl App {
             let header_h = if need_header { REMOTE_TODO_HEADER_H } else { 0.0 };
             let lines = c.wrap(&item.summary, 11.0, if item.done { W::Regular } else { W::Semibold }, title_w, usize::MAX);
             let line_h = REMOTE_TODO_LINE_H;
-            let row_h = 4.0 + lines.len() as f32 * line_h + 4.0;
+            let expanded = self.remote_todo_focus.as_deref() == Some(item.done_key().as_str());
+            let row_h = remote_todo_row_h(c, &item, expanded);
             let block_h = header_h + row_h;
             if y + block_h > bottom && last_bucket.is_some() { break; }
             let color = remote_bucket_color(item.bucket, item.done);
@@ -1225,7 +1242,7 @@ impl App {
             let ink = if checked { theme::GRAY } else { theme::WHITE };
             c.fill(16.0, y + 2.0, 3.0, (row_h - 4.0).max(10.0), 1.5, color);
             let ct = ctx.animate_bool_with_time(egui::Id::new(("todo-remote-check", item.done_key())), checked, 0.28);
-            let cy = y + row_h * 0.45;
+            let cy = y + (row_h - if expanded { REMOTE_TODO_EXPAND_H } else { 0.0 }) * 0.45;
             c.ring(30.0, cy, 5.0, 1.3, paint::alpha(if checked { Color32::from_gray(120) } else { color }, 1.0 - ct));
             if ct > 0.0 {
                 c.circle(30.0, cy, 5.6 * ct.min(1.0), theme::GREEN);
@@ -1237,6 +1254,7 @@ impl App {
                 self.say(if !checked { "正在写回…" } else { "已取消完成标记" });
             }
             let mut ly = y + 11.0;
+            let title_top = y + 2.0;
             for line in &lines {
                 c.text(44.0, ly, line, 11.0, if checked { W::Regular } else { W::Semibold }, ink, H::Left);
                 ly += line_h;
@@ -1246,9 +1264,30 @@ impl App {
             }
             let mut tip = vec![item.source.label().to_string(), item.key.clone()];
             if let Some(s) = item.status.as_deref().filter(|s| !s.is_empty()) { tip.push(s.to_string()); }
-            let row = c.hit(40.0, y - 1.0, 352.0, row_h, ("todo-remote-open", idx)).on_hover_text(tip.join(" · "));
-            if let Some(url) = item.url.clone() {
+            let tip_text = tip.join(" · ");
+            let mut open_source = false;
+            if expanded {
+                let ey = y + row_h - 8.0;
+                if let Some(s) = item.status.as_deref().filter(|s| !s.is_empty()) {
+                    c.text(44.0, ey, &c.fit(s, 9.0, W::Regular, 200.0), 9.0, W::Regular, theme::GRAY, H::Left);
+                }
+                if item.url.is_some() {
+                    c.fill(336.0, ey - 12.0, 44.0, 16.0, 6.0, theme::BLUE);
+                    c.text(358.0, ey, "打开", 10.0, W::Semibold, theme::WHITE, H::Center);
+                    let browse = c.hit(336.0, ey - 12.0, 44.0, 16.0, ("todo-remote-browse", idx));
+                    if browse.clicked() { open_source = true; }
+                }
+                let title_h = (lines.len() as f32 * line_h).max(14.0);
+                let title = c.hit(40.0, title_top, 250.0, title_h, ("todo-remote-title", idx)).on_hover_text(tip_text.clone());
+                if title.clicked() && item.url.is_some() { open_source = true; }
+            } else {
+                let row = c.hit(40.0, y - 1.0, 352.0, row_h, ("todo-remote-open", idx)).on_hover_text(tip_text);
                 if row.clicked() && !check.clicked() {
+                    self.remote_todo_focus = Some(item.done_key());
+                }
+            }
+            if open_source {
+                if let Some(url) = item.url.clone() {
                     self.pending.push(Cmd::OpenUrl(url));
                 }
             }
@@ -1257,14 +1296,14 @@ impl App {
         let _ = (ctx, first);
     }
 
-    /// 粘性确认条：收起时占满岛体，展开时在右上角；点「确认」前不会消失。
+    /// 粘性确认条：收起时占满岛体，展开时在右上角。10 秒内未确认会自动收起，改由常驻图标承接。
     pub(crate) fn draw_todo_nudge(&mut self, c: &Card, panel: egui::Rect, collapsed: bool) {
         let pending: Vec<_> = self.todo_sync.pending_nudges().into_iter().cloned().collect();
         if pending.is_empty() { return; }
         let count = pending.len();
         if collapsed {
             c.text(16.0, 18.0, "待办提醒", 13.0, W::Semibold, theme::WHITE, H::Left);
-            let sub = format!("{count} 项到期或即将到期，确认前会一直留在岛上");
+            let sub = format!("{count} 项到期或即将到期，10 秒内确认后不再提示");
             c.text(16.0, 34.0, &c.fit(&sub, 9.0, W::Regular, 250.0), 9.0, W::Regular, theme::GRAY, H::Left);
             c.fill(292.0, 10.0, 56.0, 24.0, 8.0, theme::BLUE);
             c.text(320.0, 26.5, "确认", 12.0, W::Semibold, theme::WHITE, H::Center);
@@ -1285,7 +1324,7 @@ impl App {
                 return;
             }
             if open.clicked() {
-                self.show_page(crate::app::REMOTE_TODO_PAGE);
+                self.open_remote_todo_focus();
             }
         } else {
             let label = format!("{count} 项待确认");
@@ -1302,7 +1341,7 @@ impl App {
                 return;
             }
             if open.clicked() {
-                self.show_page(crate::app::REMOTE_TODO_PAGE);
+                self.open_remote_todo_focus();
             }
         }
     }

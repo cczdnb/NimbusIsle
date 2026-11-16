@@ -331,6 +331,11 @@ impl State {
         pending_nudge_items(&self.items, &self.config.acked_nudges)
     }
 
+    /// 未确认的到期/即将到期事项里最紧急的一条：先到期，再按截止日期由近到远。
+    pub fn most_urgent_pending(&self) -> Option<&RemoteItem> {
+        most_urgent_pending_item(&self.pending_nudges())
+    }
+
     pub fn ack_pending_nudges(&mut self) {
         let updates: Vec<(String, u8)> = self.pending_nudges().into_iter()
             .filter_map(|it| it.bucket.nudge_level().map(|level| (it.done_key(), level)))
@@ -549,6 +554,12 @@ fn due_sort_key(it: &RemoteItem) -> (u8, String) {
     }
 }
 
+pub fn most_urgent_pending_item<'a>(items: &[&'a RemoteItem]) -> Option<&'a RemoteItem> {
+    items.iter().copied().min_by(|a, b| {
+        a.bucket.cmp(&b.bucket).then(due_sort_key(a).cmp(&due_sort_key(b)))
+    })
+}
+
 pub fn remote_empty_hint_text(items_empty: bool, syncing: bool, last_sync: &str, last_ok: bool, last_message: &str) -> Option<String> {
     if !items_empty { return None; }
     if syncing { return Some("正在同步第三方待办…".into()); }
@@ -670,6 +681,18 @@ mod tests {
         let all = vec![("jira:UL-1".into(), 1u8), ("jira:UL-2".into(), 1u8), ("jira:UL-9".into(), 1u8)];
         assert!(pending_nudge_items(&[due, promoted, due2], &all).is_empty());
         assert!(pending_nudge_items(&[later], &[]).is_empty(), "「其他」不进入粘性提醒");
+    }
+
+    #[test]
+    fn most_urgent_pending_prefers_due_then_nearest_date() {
+        let soon = RemoteItem { key: "S".into(), summary: "即将".into(), due: Some("2026-11-14".into()), status: None, url: None, priority: 2, ext_id: None, list_id: None, source: Source::Jira, bucket: Bucket::Soon, done: false, updated_at: None };
+        let due_later = RemoteItem { key: "D2".into(), summary: "较晚到期".into(), due: Some("2026-11-15".into()), status: None, url: None, priority: 2, ext_id: None, list_id: None, source: Source::Jira, bucket: Bucket::Due, done: false, updated_at: None };
+        let due_near = RemoteItem { key: "D1".into(), summary: "更早到期".into(), due: Some("2026-11-13".into()), status: None, url: None, priority: 2, ext_id: None, list_id: None, source: Source::Jira, bucket: Bucket::Due, done: false, updated_at: None };
+        let items = [&soon, &due_later, &due_near];
+        assert_eq!(most_urgent_pending_item(&items).unwrap().key, "D1");
+        let only_soon = [&soon];
+        assert_eq!(most_urgent_pending_item(&only_soon).unwrap().key, "S");
+        assert!(most_urgent_pending_item(&[]).is_none());
     }
 
     #[test]

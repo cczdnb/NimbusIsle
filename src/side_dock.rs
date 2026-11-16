@@ -21,14 +21,14 @@ pub const SIDE_HALF_EXTENT: f32 = 150.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SideItem {
-    Clock, Weather, Battery, Music, Focus, Bell,
+    Clock, Weather, Battery, Music, Focus, Bell, RemoteTodo,
     /// AI 额度：账号下标（None 为「+N」）与高度。
     Quota(usize, f32),
 }
 
 impl SideItem {
     fn height(self, clock_seconds: bool) -> f32 {
-        match self { Self::Clock => if clock_seconds {46.0}else{32.0}, Self::Weather => 40.0, Self::Battery => 20.0, Self::Music => 18.0, Self::Focus => 22.0, Self::Bell => 22.0, Self::Quota(_, h) => h }
+        match self { Self::Clock => if clock_seconds {46.0}else{32.0}, Self::Weather => 40.0, Self::Battery => 20.0, Self::Music => 18.0, Self::Focus => 22.0, Self::Bell => 22.0, Self::RemoteTodo => 24.0, Self::Quota(_, h) => h }
     }
 }
 
@@ -46,6 +46,7 @@ impl App {
         if self.pomo.running { items.push(SideItem::Focus); }
         items.extend(self.quota_side_items().into_iter().map(|(index, h)| SideItem::Quota(index, h)));
         if self.t < self.notification_bell_until { items.push(SideItem::Bell); }
+        if self.nudge_icon_visible() { items.push(SideItem::RemoteTodo); }
         items
     }
 
@@ -145,6 +146,18 @@ impl App {
                 SideItem::Bell => {
                     paint::bell(&c.scaled(cx, mid, 1.1), cx, mid, theme::WHITE, paint::bell_swing(self.t - self.notification_bell_at));
                     c.circle(cx + 4.0, mid - 4.5, 2.0, Color32::from_rgb(255, 72, 72));
+                }
+                SideItem::RemoteTodo => {
+                    let count = self.todo_sync.pending_nudges().len();
+                    paint::todo_nudge_icon(c, cx, mid, 16.0);
+                    c.circle(cx + 7.0, mid - 7.0, 6.0, Color32::from_rgb(255, 72, 72));
+                    c.text(cx + 7.0, mid - 3.5, &count.to_string(), 8.0, W::Bold, theme::WHITE, H::Center);
+                    if c.hit(cx - 12.0, mid - 12.0, 24.0, 24.0, "todo-nudge-icon-side")
+                        .on_hover_text(format!("{count} 项待确认"))
+                        .clicked()
+                    {
+                        self.open_remote_todo_focus();
+                    }
                 }
             }
             y += h;

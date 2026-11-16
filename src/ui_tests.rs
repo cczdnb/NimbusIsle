@@ -2616,6 +2616,37 @@ fn joined_texts(h: &H) -> String {
     painted_texts(h).replace('\u{0A}', "")
 }
 
+
+fn wait_nudge_timeout(h: &mut H) {
+    if h.app.nudge_started_at.is_none() {
+        for _ in 0..30 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
+    }
+    let start = h.app.nudge_started_at.expect("确认条计时应已开始");
+    while h.app.t - start < crate::app::NUDGE_BANNER_SECS + 0.05 {
+        h.app.open=false;
+        h.cursor=None;
+        h.frame(vec![]);
+    }
+    for _ in 0..45 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
+}
+
+fn click_todo_nudge_icon(h: &mut H) {
+    let layout = h.app.resident.current();
+    let x = layout.x[crate::bar_layout::REMOTE_TODO].expect("超时后常驻栏应出现待办图标");
+    let count = h.app.todo_sync.pending_nudges().len().to_string();
+    let mut point = H::local(crate::app::PW / 2.0 + x, 15.0);
+    for s in &h.shapes {
+        if let egui::Shape::Text(text) = &s.shape {
+            if text.galley.text() == count {
+                let c = text.visual_bounding_rect().center();
+                if c.y < 40.0 { point = c; break; }
+            }
+        }
+    }
+    h.hover(point, 0.15);
+    h.click(point);
+}
+
 fn seed_remote_buckets(h: &mut H) {
     use crate::todo_sync::Bucket;
     h.app.todo_sync.items = vec![
@@ -2805,7 +2836,7 @@ fn local_todo_page_stays_free_of_remote_items() {
 }
 
 #[test]
-fn sticky_todo_nudge_stays_until_confirm_and_opens_remote_page() {
+fn todo_nudge_auto_hides_after_10s_to_resident_icon() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
     h.app.open=false;
@@ -2814,46 +2845,163 @@ fn sticky_todo_nudge_stays_until_confirm_and_opens_remote_page() {
     h.app.open=false;
     for _ in 0..30 { h.frame(vec![]); }
     let texts=painted_texts(&h);
-    assert!(texts.contains("待办提醒"), "收起时应显示粘性确认条：{texts}");
+    assert!(texts.contains("待办提醒"), "收起时应显示确认条：{texts}");
     assert!(texts.contains("确认"), "{texts}");
     assert!(texts.contains("今天要交的报告"), "{texts}");
     assert!(texts.contains("明天的评审"), "{texts}");
-    assert!(!texts.contains("更晚的任务"), "「其他」与「未排期」不应进入粘性条：{texts}");
-    assert!(texts.contains("确认前会一直留在岛上") || joined_texts(&h).contains("确认前会一直"), "{texts}");
-    // 远长于原先 8 秒闪过的提醒，确认条仍在。
-    for _ in 0..600 { h.app.open=false; h.frame(vec![]); }
-    let texts=painted_texts(&h);
-    assert!(texts.contains("待办提醒"), "未点确认前不应消失：{texts}");
-    assert!(texts.contains("今天要交的报告"), "{texts}");
+    assert!(!texts.contains("更晚的任务"), "「其他」与「未排期」不应进入确认条：{texts}");
+    assert!(texts.contains("10 秒") || joined_texts(&h).contains("10 秒"), "应提示 10 秒内确认：{texts}");
+    assert!(!h.app.nudge_icon_visible(), "确认条展示期间不应出现常驻图标");
+    assert_eq!(h.app.todo_sync.pending_nudges().len(), 2);
 
+    wait_nudge_timeout(&mut h);
+    let texts=painted_texts(&h);
+    assert!(!texts.contains("待办提醒"), "10 秒未确认后确认条应自动收起：{texts}");
+    assert!(!texts.contains("项待确认") || h.app.nudge_icon_visible(), "{texts}");
+    assert!(!texts.contains("今天要交的报告") || h.app.open, "收起后确认条清单应消失：{texts}");
+    assert!(h.app.nudge_icon_visible(), "超时后应出现常驻待办图标");
+    assert_eq!(h.app.todo_sync.pending_nudges().len(), 2, "超时只隐藏确认条，不应自动确认");
+    let layout=h.app.resident.current();
+    assert!(layout.x[crate::bar_layout::REMOTE_TODO].is_some(), "常驻布局应包含待办图标槽");
+}
+
+#[test]
+fn todo_nudge_confirm_within_10s_leaves_no_icon() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    assert!(painted_texts(&h).contains("待办提醒"));
+    assert!(!h.app.nudge_timed_out);
+    h.cmds.clear();
     h.click_text("确认");
-    h.cursor = None;
+    h.cursor=None;
     for _ in 0..30 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
-    let texts=painted_texts(&h);
-    assert!(!texts.contains("待办提醒"), "点击确认后粘性条应消失：{texts}");
-    assert!(!texts.contains("项待确认"), "点击确认后展开条也不应再出现：{texts}");
     assert!(h.app.todo_sync.pending_nudges().is_empty(), "确认后不应再有待确认事项：{:?}", h.app.todo_sync.config.acked_nudges);
+    assert!(!h.cmds.iter().any(|cmd| matches!(cmd, crate::app::Cmd::OpenUrl(_))), "确认只关闭提醒，不得打开来源页：{:?}", h.cmds);
+    // 再等到超过 10 秒，也不应冒出常驻图标。
+    for _ in 0..700 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
+    let texts=painted_texts(&h);
+    assert!(!texts.contains("待办提醒"), "10 秒内确认后确认条不应再出现：{texts}");
+    assert!(!h.app.nudge_icon_visible(), "10 秒内确认的事项不应留下常驻图标");
+    assert!(h.app.resident.current().x[crate::bar_layout::REMOTE_TODO].is_none());
+}
 
-    // 新的到期事项可以叠加上去，再次出现确认条。
+#[test]
+fn todo_nudge_count_badge_and_new_items_restart_banner() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    wait_nudge_timeout(&mut h);
+    assert!(h.app.nudge_icon_visible());
+    assert_eq!(h.app.todo_sync.pending_nudges().len(), 2);
+
     use crate::todo_sync::Bucket;
     h.app.todo_sync.items.push(sample_remote("UL-9", "新出现的到期事项", Some("2026-11-13"), Bucket::Due));
-    h.cursor = None;
+    h.cursor=None;
     for _ in 0..60 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
     let texts=painted_texts(&h);
     assert!(texts.contains("待办提醒"), "新到期事项应再次弹出确认条：{texts}");
     assert!(texts.contains("新出现的到期事项"), "{texts}");
-    assert_eq!(h.app.todo_sync.pending_nudges().len(), 1);
+    assert!(h.app.nudge_active(), "新事项应重启确认条计时");
+    assert!(!h.app.nudge_icon_visible(), "确认条再次出现时图标让位给确认条");
+    assert_eq!(h.app.todo_sync.pending_nudges().len(), 3);
+    wait_nudge_timeout(&mut h);
+    assert!(!painted_texts(&h).contains("待办提醒"), "再次超时后确认条应收起：{}", painted_texts(&h));
+    assert!(h.app.nudge_icon_visible(), "未确认事项仍应由常驻图标表示");
+    assert_eq!(h.app.todo_sync.pending_nudges().len(), 3, "图标计数应包含全部未确认事项");
+}
 
-    // 点击条本身（非确认）打开第三方待办页。
+#[test]
+fn todo_nudge_bar_or_icon_opens_page_and_expands_most_urgent() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    assert!(painted_texts(&h).contains("待办提醒"));
     h.click_text("待办提醒");
     assert_eq!(h.app.page, crate::app::REMOTE_TODO_PAGE, "点击确认条应打开第三方待办页");
     assert!(h.app.open);
     h.hover(H::local(200.0, 80.0), 1.0);
     let texts=painted_texts(&h);
     assert!(texts.contains("第三方"), "展开后应是第三方待办页：{texts}");
-    assert!(texts.contains("新出现的到期事项") || texts.contains("今天要交的报告"), "{texts}");
+    assert!(texts.contains("今天要交的报告"), "应定位并展开最紧急（已到期）事项：{texts}");
+    assert!(texts.contains("打开"), "展开项应提供打开来源页的控件：{texts}");
+    assert_eq!(h.app.remote_todo_focus.as_deref(), Some(h.app.todo_sync.items[0].done_key().as_str()));
+
+    h.cmds.clear();
+    h.click_text("打开");
+    h.frame(vec![]);
+    assert!(h.cmds.contains(&crate::app::Cmd::OpenUrl("http://jira.example.invalid/browse/UL-1".into())), "打开应跳到来源页：{:?}", h.cmds);
+
+    // 超时后点常驻图标，同样打开第 9 页并展开最紧急未确认项。
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    wait_nudge_timeout(&mut h);
+    assert!(h.app.nudge_icon_visible());
+    h.cmds.clear();
+    click_todo_nudge_icon(&mut h);
+    assert_eq!(h.app.page, crate::app::REMOTE_TODO_PAGE, "点击常驻图标应打开第三方待办页");
+    assert!(h.app.open);
+    h.hover(H::local(200.0, 80.0), 1.0);
+    let texts=painted_texts(&h);
+    assert!(texts.contains("今天要交的报告"), "图标点击应展开最紧急未确认事项：{texts}");
+    assert!(texts.contains("打开"), "{texts}");
+    assert!(!h.cmds.iter().any(|cmd| matches!(cmd, crate::app::Cmd::OpenUrl(_))), "仅打开页面时不应自动打开来源页：{:?}", h.cmds);
+
+    let page=h.app.page;
+    let first=h.app.remote_todo_first;
+    h.hover(H::local(300.0, 80.0), 0.3);
+    h.wheel(-30.0);
+    assert_ne!(h.app.page, page, "滚轮仍应切换岛上卡片，不得被本页拦截");
+    assert_eq!(h.app.remote_todo_first, first, "滚轮不得改变第三方待办列表起点");
 }
 
+#[test]
+fn todo_nudge_title_opens_source_and_confirm_does_not() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    h.click_text("待办提醒");
+    h.hover(H::local(200.0, 80.0), 1.0);
+    assert!(painted_texts(&h).contains("今天要交的报告"));
+    h.cmds.clear();
+    h.click_text("今天要交的报告");
+    h.frame(vec![]);
+    assert!(h.cmds.contains(&crate::app::Cmd::OpenUrl("http://jira.example.invalid/browse/UL-1".into())), "展开项的标题应打开来源页：{:?}", h.cmds);
+
+    let mut h=H::new();
+    h.app.open=false;
+    seed_remote_buckets(&mut h);
+    for _ in 0..90 { h.frame(vec![]); }
+    h.app.open=false;
+    for _ in 0..30 { h.frame(vec![]); }
+    h.cmds.clear();
+    h.click_text("确认");
+    h.cursor=None;
+    for _ in 0..20 { h.app.open=false; h.cursor=None; h.frame(vec![]); }
+    assert!(h.app.todo_sync.pending_nudges().is_empty());
+    assert!(!h.cmds.iter().any(|cmd| matches!(cmd, crate::app::Cmd::OpenUrl(_))), "确认不得打开来源页：{:?}", h.cmds);
+    assert!(!h.app.nudge_icon_visible());
+}
 
 #[test]
 fn remote_todo_page_shows_four_to_six_items_and_sorts_near_to_far() {
@@ -6448,12 +6596,12 @@ fn resident_components_can_be_dragged_saved_and_reset(){
 
 #[test]
 fn weather_resident_settings_preserve_old_orders_and_the_status_switch(){
-    use crate::bar_layout::{BATTERY,CLOCK,FOCUS,MUSIC,PET,QUOTA,WEATHER};
+    use crate::bar_layout::{BATTERY,CLOCK,FOCUS,MUSIC,PET,QUOTA,REMOTE_TODO,WEATHER};
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=H::new();
     let path=crate::model::config_dir().join("settings.txt");std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path,"resident_order=7,6,2,0,9,1\nshow_weather=0\n").unwrap();
     h.app.settings=crate::model::Settings::load();
-    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY],"旧排列应在时钟后插入天气并保留其余顺序");
+    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO],"旧排列应在时钟后插入天气，并在末尾补上待办提醒槽");
     h.app.weather.snapshot=Some(crate::weather::Snapshot{temp:9.0,..Default::default()});
     assert!(h.app.weather_pill().is_none(),"状态开关关闭后天气不占常驻位置");
     assert!(h.app.module_on(8),"关闭常驻天气应保留天气页面");
@@ -7968,7 +8116,7 @@ fn side_dock_stacks_ai_quota_and_opens_the_account(){
     let total=h.app.side_bar_len()-14.0;
     let mut y=top+(h.app.h.pos-total)/2.0;
     for item in h.app.side_items() {
-        let height=match item {crate::side_dock::SideItem::Quota(i,hh) if h.app.quota.config.accounts[i].id==wb=>{y+=hh/2.0;break;},crate::side_dock::SideItem::Quota(_,hh)=>hh,crate::side_dock::SideItem::Clock=>32.0,crate::side_dock::SideItem::Weather=>40.0,crate::side_dock::SideItem::Battery=>20.0,crate::side_dock::SideItem::Music=>18.0,crate::side_dock::SideItem::Focus|crate::side_dock::SideItem::Bell=>22.0};
+        let height=match item {crate::side_dock::SideItem::Quota(i,hh) if h.app.quota.config.accounts[i].id==wb=>{y+=hh/2.0;break;},crate::side_dock::SideItem::Quota(_,hh)=>hh,crate::side_dock::SideItem::Clock=>32.0,crate::side_dock::SideItem::Weather=>40.0,crate::side_dock::SideItem::Battery=>20.0,crate::side_dock::SideItem::Music=>18.0,crate::side_dock::SideItem::Focus|crate::side_dock::SideItem::Bell=>22.0,crate::side_dock::SideItem::RemoteTodo=>24.0};
         y+=height;
     }
     let click=Pos2::new(18.0,y);
@@ -9158,7 +9306,7 @@ fn weather_icon_atlas_preview(){
     for (name,palette,ppp) in [("weather-icons-dark",None,2.0f32),("weather-icons-cream",Some(crate::skin_paint::CREAM),2.0),("weather-icons-glass-light",Some(crate::skin_paint::GLASS_LIGHT),2.0),("weather-icons-dark-1x",None,1.0),("weather-icons-dark-125",None,1.25),("weather-icons-dark-150",None,1.5)] {
         let (pw,ph)=((924.0*ppp) as usize,(700.0*ppp) as usize);
         let mut h=H::new();h.app.settings.pet=false;
-        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true);layout.widths[crate::bar_layout::WEATHER]=50.0;
+        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false);layout.widths[crate::bar_layout::WEATHER]=50.0;
         let mut raster=crate::preview_raster::Raster::new(pw,ph);
         for frame in 0..4 {
             let raw=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(924.0,700.0))),time:Some(frame as f64),

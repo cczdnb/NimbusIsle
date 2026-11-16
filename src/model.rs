@@ -448,6 +448,9 @@ impl Settings {
                     if order.len()==6 && !order.contains(&crate::bar_layout::WEATHER) {
                         if let Some(clock)=order.iter().position(|slot|*slot==crate::bar_layout::CLOCK){order.insert(clock+1,crate::bar_layout::WEATHER);}
                     }
+                    if order.len()==7 && !order.contains(&crate::bar_layout::REMOTE_TODO) {
+                        order.push(crate::bar_layout::REMOTE_TODO);
+                    }
                     if crate::bar_layout::valid_order(&order){s.resident_order=order;}
                 }
                 "page_order" => {

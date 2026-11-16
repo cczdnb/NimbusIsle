@@ -37,6 +37,8 @@ pub const WEATHER_PAGE: usize = 8;
 pub const REMOTE_TODO_PAGE: usize = 9;
 pub(crate) const WEATHER_H: f32 = 232.0;
 pub(crate) const REMOTE_TODO_H: f32 = 232.0;
+/// 粘性确认条展示时长：超时后自动收起，改由常驻栏图标承接未确认事项。
+pub const NUDGE_BANNER_SECS: f64 = 10.0;
 pub(crate) const CALENDAR_H: f32 = 216.0;
 pub const BAR_W: f32 = 163.0; // 收起药丸宽
 pub const BAR_H: f32 = 30.0; // 收起药丸高
@@ -850,6 +852,12 @@ pub struct App {
     pub(crate) pending: Vec<Cmd>,
     pub(crate) todo_first: usize,
     pub(crate) remote_todo_first: usize,
+    pub(crate) remote_todo_focus: Option<String>,
+    pub(crate) remote_todo_keep_first: bool,
+    /// 当前这轮确认条开始展示的时间；超时后隐藏条、显示常驻图标。
+    pub(crate) nudge_started_at: Option<f64>,
+    pub(crate) nudge_timed_out: bool,
+    pub(crate) nudge_session_keys: Vec<String>,
     pub(crate) todo_choosing: bool,
     pub(crate) pet: crate::pet::Pet,
     pub(crate) last_drink: Option<(u32, usize)>,
@@ -1005,7 +1013,7 @@ impl App {
             forced_open_until:0.0, settings_open:false, settings_window:std::sync::Arc::new(std::sync::Mutex::new(crate::settings_window::State::load())), displays:Vec::new(), browser_at_top:false, browser_minimal_active:false, glass_tint:0.0, fluid:Default::default(), fluid_origin:Pos2::ZERO, fluid_art:None, fluid_title:String::new(), screen:None, settings_focus_requested:false, settings_tab:0, settings_category:0, messenger_statuses:Default::default(), notification_apps:model::NotificationApps::load(), subpage:None, task_dialog:None,
             listener_status: "尚未连接".into(),
             notification_bell_until: 0.0, notification_bell_at: -10.0, notice: None, hud_notice: None, hud_alpha: 0.0, notice_width:Spring::new(0.0,CLOSE.0,CLOSE.1), notice_details:false, pending_messengers:Vec::new(), messenger_scroll:0.0, alerts: Default::default(), history: Default::default(), pending: vec![],
-            todo_first: 0, remote_todo_first: 0, todo_choosing: false, pet: Default::default(), last_drink: None,
+            todo_first: 0, remote_todo_first: 0, remote_todo_focus: None, remote_todo_keep_first: false, nudge_started_at: None, nudge_timed_out: false, nudge_session_keys: Vec::new(), todo_choosing: false, pet: Default::default(), last_drink: None,
             toast: None, toast_below: false,
             last_input: 0.0, system_idle: None,
             last_cursor: None,
@@ -1818,8 +1826,67 @@ impl App {
     pub fn set_minimal(&mut self,enabled:bool) {
         self.settings.minimal=enabled;if enabled {self.settings.pet=false;}self.settings.save();
     }
+    pub(crate) fn refresh_nudge_session(&mut self) {
+        if !self.module_on(REMOTE_TODO_PAGE) {
+            self.nudge_started_at = None;
+            self.nudge_timed_out = false;
+            self.nudge_session_keys.clear();
+            return;
+        }
+        let keys: Vec<String> = self.todo_sync.pending_nudges().iter().map(|it| it.done_key()).collect();
+        if keys.is_empty() {
+            self.nudge_started_at = None;
+            self.nudge_timed_out = false;
+            self.nudge_session_keys.clear();
+            return;
+        }
+        let has_new = keys.iter().any(|key| !self.nudge_session_keys.iter().any(|seen| seen == key));
+        if has_new || self.nudge_started_at.is_none() {
+            self.nudge_started_at = Some(self.t);
+            self.nudge_timed_out = false;
+        }
+        self.nudge_session_keys = keys;
+        if let Some(start) = self.nudge_started_at {
+            if !self.nudge_timed_out && self.t - start >= NUDGE_BANNER_SECS {
+                self.nudge_timed_out = true;
+            }
+        }
+    }
+    /// 确认条是否正在显示（未超时、仍有未确认的到期/即将到期事项）。
     pub(crate) fn nudge_active(&self) -> bool {
-        self.module_on(REMOTE_TODO_PAGE) && !self.todo_sync.pending_nudges().is_empty()
+        self.module_on(REMOTE_TODO_PAGE) && !self.todo_sync.pending_nudges().is_empty() && !self.nudge_timed_out
+    }
+    pub(crate) fn nudge_icon_visible(&self) -> bool {
+        self.module_on(REMOTE_TODO_PAGE) && !self.todo_sync.pending_nudges().is_empty() && self.nudge_timed_out
+    }
+    pub(crate) fn open_remote_todo_focus(&mut self) {
+        let focus = self.todo_sync.most_urgent_pending().map(|it| it.done_key());
+        self.remote_todo_focus = focus.clone();
+        if let Some(key) = &focus {
+            let order = self.todo_sync.display_items();
+            if let Some(pos) = order.iter().position(|&i| self.todo_sync.items[i].done_key() == *key) {
+                self.remote_todo_first = pos;
+                self.remote_todo_keep_first = true;
+            }
+        }
+        self.show_page(REMOTE_TODO_PAGE);
+    }
+    fn draw_resident_todo_nudge(&mut self, c: &Card, x: f32, layout: &crate::bar_layout::Layout) {
+        let count = self.todo_sync.pending_nudges().len();
+        if count == 0 { return; }
+        crate::paint::todo_nudge_icon(c, x, 15.0, 16.0);
+        let label = count.to_string();
+        c.circle(x + 7.0, 8.0, 6.0, Color32::from_rgb(255, 72, 72));
+        c.text(x + 7.0, 11.5, &label, 8.0, W::Bold, theme::WHITE, H::Center);
+        let w = layout.widths.get(bar::REMOTE_TODO).copied().unwrap_or(bar::REMOTE_TODO_WIDTH);
+        let tip = format!("{count} 项待确认");
+        if c.hit(x - w / 2.0 - 2.0, 0.0, w + 4.0, 28.0, "todo-nudge-icon")
+            .on_hover_text(tip)
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            self.open_remote_todo_focus();
+        }
     }
     fn nudge_size(&self) -> (f32, f32) {
         let n = self.todo_sync.pending_nudges().len().min(3);
@@ -1827,7 +1894,7 @@ impl App {
         (360.0, 48.0 + n as f32 * 16.0 + extra)
     }
     fn base_size(&self) -> (f32, f32) {
-        // 粘性待办提醒优先于歌词岛和极简细条，直到用户点「确认」。
+        // 粘性待办确认条优先于歌词岛和极简细条；超时后改由常驻图标承接。
         if !self.open && self.nudge_active() {
             let (width, height) = self.nudge_size();
             return (width + self.pet_space(), height);
@@ -1883,6 +1950,7 @@ impl App {
         let elapsed = self.last_t.map(|at| (env.t - at).max(0.0) as f32).unwrap_or(0.0);
         self.last_t = Some(env.t);
         self.t = env.t;
+        self.refresh_nudge_session();
         self.fullscreen_hidden=env.fullscreen_hidden;
         self.quota_tick();
         self.weather_tick();
@@ -1929,12 +1997,15 @@ impl App {
         let bell=self.t<self.notification_bell_until&&!self.compact_notices();
         self.resident_power=(env.battery,env.charging);
         let show_music_slot=self.media.is_music()&&!bell&&!self.auto_now_playing();
-        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some());
+        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible());
         layout.reorder(&self.settings.resident_order);
         for (position,extra) in self.quota_balance_layout(&ctx){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
         if self.settings.clock_seconds { layout.widen_clock(24.0); }
         if let Some(extra)=self.weather_pill_extra(&ctx){ layout.widen(bar::WEATHER,extra); }
+        if self.nudge_icon_visible() && self.todo_sync.pending_nudges().len() >= 10 {
+            layout.widen(bar::REMOTE_TODO, 6.0);
+        }
         if !self.settings.show_clock {layout.hide_clock();}
         if self.pet_enabled() {
             if let Some(a)=self.notice.as_ref().filter(|_|!self.compact_notices()&&!self.open){layout.x[bar::PET]=Some(22.0-(self.notice_size(a).0+self.pet_space())/2.0);}
@@ -1949,6 +2020,11 @@ impl App {
             self.poll_lyrics();
         }
         self.todo_sync.poll(true);
+        self.refresh_nudge_session();
+        if self.nudge_active() {
+            let remain = self.nudge_started_at.map(|at| (NUDGE_BANNER_SECS - (self.t - at)).max(0.05)).unwrap_or(0.05);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(remain.min(1.0)));
+        }
         self.update_island_lyric_layout(&ctx);
         self.update_playing_bar_width(&ctx, env);
 
@@ -3242,6 +3318,7 @@ impl App {
             let c=base.faded(compact_alpha);let c=if compact_alpha<0.8{c.ghost()}else{c};
             self.draw_quota_bar(&c,local_cx,&layout);
             if let Some(x)=layout.x[bar::WEATHER] { self.draw_pill_weather(&c,local_cx+x,&layout); }
+            if let Some(x)=layout.x[bar::REMOTE_TODO] { self.draw_resident_todo_nudge(&c,local_cx+x,&layout); }
         }
         if self.pomo.running && compact_alpha>0.004 {
             crate::focus_bar::draw(&base.faded(compact_alpha),local_cx+layout.x[bar::FOCUS].unwrap(),15.0,self.t,&self.pomo,self.phase_secs(self.pomo.phase),false);
