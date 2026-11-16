@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 查看已有讨论
+    url: https://github.com/cczdnb/NimbusIsle/issues
+    about: 相同的需求可以先在已有 issue 里补充。
