@@ -1,14 +1,13 @@
 //! 持久化与状态模型。
 //!
-//! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），但默认目录
-//! 用独立的 `%APPDATA%\Daozai`，避免与原工具的 `%APPDATA%\Nusa` 互相覆盖：
-//!   %APPDATA%\Daozai\settings.txt   -> pet=0/1, minimal=0/1
-//!   %APPDATA%\Daozai\todo.txt
-//!   %APPDATA%\Daozai\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
-//!   %APPDATA%\Daozai\shelf.txt      -> 置物清单（每行一个绝对路径）
+//! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），默认目录是
+//! `%APPDATA%\Yunyu`，和原版岛仔的 `%APPDATA%\Daozai` 分开：
+//!   %APPDATA%\Yunyu\settings.txt   -> pet=0/1, minimal=0/1
+//!   %APPDATA%\Yunyu\todo.txt
+//!   %APPDATA%\Yunyu\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
+//!   %APPDATA%\Yunyu\shelf.txt      -> 置物清单（每行一个绝对路径）
 //!
-//! 设置环境变量 `DAOZAI_DATA_DIR` 可把以上目录整体改到别处（用于与已安装的
-//! 原工具并存、或跑测试时不碰真实数据）。
+//! 设置环境变量 `YUNYU_DATA_DIR` 可把以上目录整体改到别处（跑测试时不碰真实数据）。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,10 +17,41 @@ fn env_dir(key: &str) -> PathBuf {
 }
 
 pub fn config_dir() -> PathBuf {
-    if let Ok(root) = std::env::var("DAOZAI_DATA_DIR") {
+    if let Ok(root) = std::env::var("YUNYU_DATA_DIR") {
         return PathBuf::from(root);
     }
-    env_dir("APPDATA").join("Daozai")
+    env_dir("APPDATA").join("Yunyu")
+}
+
+/// 第一次改用 Yunyu 目录时，把已有的 Daozai 数据复制过去。原目录保留，原版岛仔继续用它。
+pub fn migrate_legacy_data() {
+    if std::env::var_os("YUNYU_DATA_DIR").is_some() {
+        return;
+    }
+    let new_dir = env_dir("APPDATA").join("Yunyu");
+    let old_dir = env_dir("APPDATA").join("Daozai");
+    if new_dir.exists() || !old_dir.is_dir() {
+        return;
+    }
+    let staging = env_dir("APPDATA").join("Yunyu.migrating");
+    let _ = fs::remove_dir_all(&staging);
+    if copy_tree(&old_dir, &staging).is_ok() {
+        let _ = fs::rename(&staging, &new_dir);
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &dest)?;
+        } else {
+            fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
 }
 
 fn read_kv(path: &Path) -> Vec<(String, String)> {

@@ -123,18 +123,18 @@ impl Client {
         parse_daily(&self.weather(&location,true)?,&location)?;Ok(())
     }
     #[cfg(all(windows,not(test)))]
-    pub fn store(&self,slot:&str)->Result<(),Error> {keyring::Entry::new("Daozai.Weather.QWeather",slot).map_err(|_|Error::Storage)?.set_password(&self.key).map_err(|_|Error::Storage)}
+    pub fn store(&self,slot:&str)->Result<(),Error> {keyring::Entry::new("Yunyu.Weather.QWeather",slot).map_err(|_|Error::Storage)?.set_password(&self.key).map_err(|_|Error::Storage)}
     #[cfg(any(not(windows),test))]
     pub fn store(&self,_slot:&str)->Result<(),Error> {if cfg!(test){Ok(())}else{Err(Error::Storage)}}
     pub fn load(host:&str,slot:&str,gate:Arc<AtomicBool>)->Option<Self> {
         #[cfg(all(windows,not(test)))]
-        {if slot.is_empty(){return None;}let key=keyring::Entry::new("Daozai.Weather.QWeather",slot).ok()?.get_password().ok()?;Self::new(host,&key,gate).ok()}
+        {if slot.is_empty(){return None;}let key=keyring::Entry::new("Yunyu.Weather.QWeather",slot).ok()?.get_password().ok()?;Self::new(host,&key,gate).ok()}
         #[cfg(any(not(windows),test))]
         {let _=(host,slot,gate);None}
     }
     pub fn delete(host:&str)->Result<(),Error> {
         #[cfg(all(windows,not(test)))]
-        {let entry=keyring::Entry::new("Daozai.Weather.QWeather",host).map_err(|_|Error::Storage)?;match entry.delete_credential(){Ok(())|Err(keyring::Error::NoEntry)=>Ok(()),Err(_)=>Err(Error::Storage)}}
+        {let entry=keyring::Entry::new("Yunyu.Weather.QWeather",host).map_err(|_|Error::Storage)?;match entry.delete_credential(){Ok(())|Err(keyring::Error::NoEntry)=>Ok(()),Err(_)=>Err(Error::Storage)}}
         #[cfg(any(not(windows),test))]
         {let _=host;Ok(())}
     }
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn current_refresh_failure_requires_repeated_errors_and_recovers_on_success(){
         let _g=crate::ui_tests::ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
-        let previous=std::env::var_os("DAOZAI_DATA_DIR");let dir=directory();std::env::set_var("DAOZAI_DATA_DIR",&dir);
+        let previous=std::env::var_os("YUNYU_DATA_DIR");let dir=directory();std::env::set_var("YUNYU_DATA_DIR",&dir);
         let mut r=Runtime::default();r.cache.location=Some(location());
         fn deliver(r:&mut Runtime,daily:bool,result:Result<Value,Error>){
             let(tx,rx)=mpsc::channel();if daily{r.daily=Some(rx);}else{r.current=Some(rx);}
@@ -305,7 +305,7 @@ mod tests {
         deliver(&mut r,true,Err(Error::Network));assert!(!r.current_refresh_failed(),"仅预报失败时温度仍正常");
         deliver(&mut r,false,Err(Error::Auth));assert!(r.current_refresh_failed(),"凭据失效导致停止重试时也应提示过期数据");
         r.reset("different.re.qweatherapi.com",Some(location()));assert!(!r.current_refresh_failed(),"切换来源配置后应重新判定");
-        if let Some(previous)=previous{std::env::set_var("DAOZAI_DATA_DIR",previous);}else{std::env::remove_var("DAOZAI_DATA_DIR");}
+        if let Some(previous)=previous{std::env::set_var("YUNYU_DATA_DIR",previous);}else{std::env::remove_var("YUNYU_DATA_DIR");}
         std::fs::remove_file(dir.join("qweather-cache.json")).unwrap();std::fs::remove_dir(dir).unwrap();
     }
 }

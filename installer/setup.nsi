@@ -7,7 +7,7 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_ID
-  !define APP_ID "Daozai"
+  !define APP_ID "Yunyu"
 !endif
 !ifndef APP_NAME
   !define APP_NAME "云屿"
@@ -38,7 +38,7 @@ Page custom InstallPage InstallPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "云屿已安装"
 !define MUI_FINISHPAGE_TEXT "音乐、提醒和日常小事，现在都在桌面上的小岛里。"
-!define MUI_FINISHPAGE_RUN "$INSTDIR\daozai.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\yunyu.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "打开云屿"
 !insertmacro MUI_PAGE_FINISH
 !define MUI_UNCONFIRMPAGE_TEXT_TOP "将卸载云屿。设置、待办和连接记录会保留，重新安装后仍可使用。"
@@ -151,9 +151,9 @@ Function CheckFolderPath
   StrCpy $0 0
 FunctionEnd
 
-; 选中的文件夹里已有别的东西（又不是云屿自己的）时，在其中新建 Daozai 子文件夹，
+; 选中的文件夹里已有别的东西（又不是云屿自己的）时，在其中新建 Yunyu 子文件夹，
 ; 避免把整个共享文件夹登记成云屿的安装位置（软件管家会把整个文件夹的大小算到云屿头上）。
-; 文件夹本身叫 Daozai、里面已有云屿（原地升级）、不存在或为空（用户特意准备的）时原样使用。
+; 文件夹本身叫 Yunyu、里面已有云屿（原地升级）、不存在或为空（用户特意准备的）时原样使用。
 Function EnsureOwnFolder
   Call CheckFolderPath
   ${If} $0 == 0
@@ -167,7 +167,7 @@ Function EnsureOwnFolder
   ${If} $0 == "${APP_ID}"
     Return
   ${EndIf}
-  ${If} ${FileExists} "$INSTDIR\daozai.exe"
+  ${If} ${FileExists} "$INSTDIR\yunyu.exe"
     Return
   ${EndIf}
   ClearErrors
@@ -213,7 +213,7 @@ Function ValidateDirectory
   SetErrorLevel 0
   Return
   invalid:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择可写入的完整安装文件夹，例如 D:\Apps\Daozai。不要选择磁盘根目录或需要管理员权限的文件夹。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择可写入的完整安装文件夹，例如 D:\Apps\Yunyu。不要选择磁盘根目录或需要管理员权限的文件夹。" /SD IDOK
     SetErrorLevel 1
     Abort
 FunctionEnd
@@ -254,39 +254,39 @@ Section "安装"
   Call ValidateDirectory
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  File /oname=daozai.exe "${SOURCE_EXE}"
+  File /oname=yunyu.exe "${SOURCE_EXE}"
   File "${PROJECT_DIR}\LICENSE"
   File "${PROJECT_DIR}\THIRD_PARTY_NOTICES.txt"
-  ; 诊断脚本已内嵌在程序里（daozai.exe --collect-diagnostics），清掉测试版留下的单独诊断文件。
+  ; 诊断脚本已内嵌在程序里（yunyu.exe --collect-diagnostics），清掉测试版留下的单独诊断文件。
   Delete "$INSTDIR\收集云屿诊断.cmd"
   Delete "$INSTDIR\scripts\collect-diagnostics.ps1"
   RMDir "$INSTDIR\scripts"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   ${If} $DesktopChoice == 1
-    CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\daozai.exe"
+    CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\yunyu.exe"
   ${Else}
     Delete "$DESKTOP\${APP_NAME}.lnk"
   ${EndIf}
   ${If} $AutoStartChoice == 1
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}" '"$INSTDIR\daozai.exe"'
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}" '"$INSTDIR\yunyu.exe"'
   ${Else}
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
   ${EndIf}
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\daozai.exe"
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}设置.lnk" "$INSTDIR\daozai.exe" "--settings"
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\yunyu.exe"
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}设置.lnk" "$INSTDIR\yunyu.exe" "--settings"
   ; 云屿打不开、卡死时的备用入口；能打开时用「设置 → 关于 → 收集诊断」。
-  CreateShortcut "$SMPROGRAMS\收集${APP_NAME}诊断.lnk" "$INSTDIR\daozai.exe" "--collect-diagnostics" "$INSTDIR\daozai.exe" 0
+  CreateShortcut "$SMPROGRAMS\收集${APP_NAME}诊断.lnk" "$INSTDIR\yunyu.exe" "--collect-diagnostics" "$INSTDIR\yunyu.exe" 0
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "cc"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\daozai.exe,0"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\yunyu.exe,0"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   ; 登记云屿自己文件的大小（KB），软件管家就不会去统计整个安装文件夹。
-  ${GetSize} "$INSTDIR" "/M=daozai.exe /S=0K /G=0" $0 $1 $2
+  ${GetSize} "$INSTDIR" "/M=yunyu.exe /S=0K /G=0" $0 $1 $2
   ${GetSize} "$INSTDIR" "/M=Uninstall.exe /S=0K /G=0" $3 $1 $2
   IntOp $0 $0 + $3
   ${GetSize} "$INSTDIR" "/M=THIRD_PARTY_NOTICES.txt /S=0K /G=0" $3 $1 $2
@@ -303,8 +303,8 @@ FunctionEnd
 
 Section "Uninstall"
   Call un.CheckClosed
-  Delete "$INSTDIR\daozai.exe"
-  Delete "$INSTDIR\daozai-previous.exe"
+  Delete "$INSTDIR\yunyu.exe"
+  Delete "$INSTDIR\yunyu-previous.exe"
   Delete "$INSTDIR\daozai-v0.2-backup.exe"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
@@ -318,7 +318,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APP_NAME}设置.lnk"
   Delete "$SMPROGRAMS\收集${APP_NAME}诊断.lnk"
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
-  ${If} $0 == '"$INSTDIR\daozai.exe"'
+  ${If} $0 == '"$INSTDIR\yunyu.exe"'
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
   ${EndIf}
   DeleteRegKey HKCU "${UNINSTALL_KEY}"

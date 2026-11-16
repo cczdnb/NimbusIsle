@@ -2,11 +2,11 @@ param([Parameter(Mandatory=$true)][string]$WorkPath, [Parameter(Mandatory=$true)
 $ErrorActionPreference = 'Stop'
 # 更新只使用当前 PowerShell 自带模块，避免继承其他终端版本的模块路径。
 $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
-$cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Daozai\Updates')).TrimEnd('\')
+$cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Yunyu\Updates')).TrimEnd('\')
 $workRoot = [IO.Path]::GetFullPath($WorkPath).TrimEnd('\')
 $target = [IO.Path]::GetFullPath($TargetExe)
 $targetDir = Split-Path $target -Parent
-$staged = Join-Path $targetDir ('daozai-update-' + [Guid]::NewGuid().ToString('N') + '.exe')
+$staged = Join-Path $targetDir ('yunyu-update-' + [Guid]::NewGuid().ToString('N') + '.exe')
 $backup = Join-Path $workRoot 'previous.exe'
 $replaced = $false
 $exited = $false
@@ -30,7 +30,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
-        $name = 'Yunyu-v' + $version + '-windows-x64/daozai.exe'
+        $name = 'Yunyu-v' + $version + '-windows-x64/yunyu.exe'
         $entries = @($zip.Entries | Where-Object {$_.FullName.Replace('\','/') -ceq $name})
         if ($entries.Count -ne 1 -or $entries[0].Length -gt 200MB) { throw '更新包中缺少唯一的云屿程序。' }
         [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $staged)
@@ -48,12 +48,12 @@ try {
     [IO.File]::Replace($staged, $target, [NullString]::Value)
     $replaced = $true
     Start-Process -FilePath $target -WorkingDirectory $targetDir -WindowStyle Hidden
-    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai'
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Yunyu'
     $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
     if ($registered -and [string]::Equals($registered.InstallLocation.TrimEnd('\'), $targetDir, [StringComparison]::OrdinalIgnoreCase)) {
         Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version -ErrorAction SilentlyContinue
         # 只统计云屿自己的文件，软件管家不会把共享安装文件夹的大小算到云屿头上。
-        $own = @('daozai.exe','Uninstall.exe','LICENSE','THIRD_PARTY_NOTICES.txt') | ForEach-Object { Join-Path $targetDir $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+        $own = @('yunyu.exe','Uninstall.exe','LICENSE','THIRD_PARTY_NOTICES.txt') | ForEach-Object { Join-Path $targetDir $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
         $sizeKb = [int][Math]::Ceiling((($own | ForEach-Object { (Get-Item -LiteralPath $_).Length }) | Measure-Object -Sum).Sum / 1KB)
         if ($sizeKb -gt 0) { Set-ItemProperty -LiteralPath $key -Name EstimatedSize -Value $sizeKb -Type DWord -ErrorAction SilentlyContinue }
         # 开始菜单「收集云屿诊断」：旧版安装没有，或指向已不再附带的 cmd；统一改为调用程序内嵌的诊断收集。失败不影响更新。

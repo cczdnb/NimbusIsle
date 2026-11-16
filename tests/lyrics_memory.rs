@@ -22,7 +22,7 @@ static ALLOCATOR:CountingAllocator=CountingAllocator;
 #[test]
 fn changing_songs_does_not_retain_per_song_animation_state(){
     let root=std::env::temp_dir().join(format!("daozai-lyrics-memory-{}",std::process::id()));
-    std::env::set_var("DAOZAI_DATA_DIR",&root);
+    std::env::set_var("YUNYU_DATA_DIR",&root);
     for expanded in [false,true] {
     let ctx=egui::Context::default();let mut app=App::new(&ctx,Options{fetch_lyrics:false,pet_idle:1e9});
     app.settings.island_lyrics=true;app.settings.pet=false;

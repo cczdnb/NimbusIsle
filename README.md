@@ -129,7 +129,7 @@ Windows 桌面伙伴，把消息、音乐、日程、天气和 AI 额度放到�
 | 下载文件 | 使用方式 |
 | --- | --- |
 | `Yunyu-Setup-v版本号-x64.exe` | **推荐**。双击安装，可选择安装位置、桌面快捷方式和开机自启 |
-| `Yunyu-v版本号-windows-x64.zip` | 免安装。完整解压后运行 `daozai.exe`，用户数据仍保存在应用数据目录 |
+| `Yunyu-v版本号-windows-x64.zip` | 免安装。完整解压后运行 `yunyu.exe`，用户数据仍保存在应用数据目录 |
 | `SHA256SUMS.txt` | 下载校验，可用 PowerShell `Get-FileHash -Algorithm SHA256` 比对 |
 
 首次安装默认创建桌面快捷方式、不开机自启。安装后从小岛或托盘打开设置，选择需要的功能和连接。
@@ -156,13 +156,13 @@ QQ 收信、邮件日程和飞书个人日历已进行真实账号测试。其�
 <details>
 <summary><b>数据与隐私</b></summary>
 
-- 设置、待办、本机日程、饮水记录、剪贴板历史、置物路径与连接元数据保存在 `%APPDATA%\Daozai`。
+- 设置、待办、本机日程、饮水记录、剪贴板历史、置物路径与连接元数据保存在 `%APPDATA%\Yunyu`。
 - 邮箱和日历密码、DeepSeek API Key 保存在 Windows 凭据管理器；独立 Gemini、WorkBuddy 会话使用 Windows DPAPI 加密。
 - 微信新消息提醒根据任务栏闪动工作，不读取联系人或聊天正文；QQ 与应用通知需要相应的系统通知权限。
 - 读取已有 AI 客户端登录时不回写原客户端配置。不要把授权码、Cookie、API Key 或登录 JSON 上传到 Issue。
 - 邮箱读取收件箱，不读取垃圾邮件文件夹；邮件正文在当前进程中用于展示和识别。
 - 云屿没有自建的邮件或日程上传后台；开启联网功能后，会访问对应服务商与歌词服务。
-- 天气只用城市名或由定位服务给出的经纬度查询 Open-Meteo；自动定位通过 `ipwho.is` 获取大致城市，失败时尝试 FreeIPAPI，不读取账号信息。最近一次天气结果缓存在 `%APPDATA%\Daozai\weather-cities.json`；本机连接诊断只记录服务域名、请求阶段、路由、耗时及错误类别，不记录 IP、坐标或代理凭据，不会自动上传。
+- 天气只用城市名或由定位服务给出的经纬度查询 Open-Meteo；自动定位通过 `ipwho.is` 获取大致城市，失败时尝试 FreeIPAPI，不读取账号信息。最近一次天气结果缓存在 `%APPDATA%\Yunyu\weather-cities.json`；本机连接诊断只记录服务域名、请求阶段、路由、耗时及错误类别，不记录 IP、坐标或代理凭据，不会自动上传。
 
 完整说明见 [隐私与安全](docs/PRIVACY.md)。
 
@@ -175,8 +175,8 @@ QQ 收信、邮件日程和飞书个人日历已进行真实账号测试。其�
 
 ```powershell
 rustup default stable-x86_64-pc-windows-msvc
-cargo build --locked --release --bin daozai
-.\target\release\daozai.exe
+cargo build --locked --release --bin yunyu
+.\target\release\yunyu.exe
 ```
 
 运行测试及打包：

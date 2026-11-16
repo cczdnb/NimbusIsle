@@ -11,7 +11,7 @@ pub mod windows_auth;
 
 pub use adapters::{Bucket, RemoteItem, SyncOutcome};
 
-const SERVICE: &str = "Daozai.TodoSync";
+const SERVICE: &str = "Yunyu.TodoSync";
 const CONFIG_FILE: &str = "todo-sync.json";
 const DONE_FILE: &str = "todo-sync-done.json";
 

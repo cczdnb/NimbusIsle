@@ -273,7 +273,7 @@ impl State {
 /// 只统计云屿自己的文件（KB）。共享安装文件夹里的其他软件不算在内。
 /// 诊断脚本已内嵌在程序里（`--collect-diagnostics`），安装目录不再附带单独的诊断文件。
 fn own_files_kb(dir: &std::path::Path) -> u32 {
-    let bytes: u64 = ["daozai.exe", "Uninstall.exe", "LICENSE", "THIRD_PARTY_NOTICES.txt"].iter()
+    let bytes: u64 = ["yunyu.exe", "Uninstall.exe", "LICENSE", "THIRD_PARTY_NOTICES.txt"].iter()
         .filter_map(|name| std::fs::metadata(dir.join(name)).ok()).filter(|meta| meta.is_file()).map(|meta| meta.len()).sum();
     bytes.div_ceil(1024).min(u64::from(u32::MAX)) as u32
 }
@@ -283,7 +283,7 @@ fn own_files_kb(dir: &std::path::Path) -> u32 {
 #[cfg(windows)]
 pub fn record_install_size() {
     use windows::{core::w, Win32::System::Registry::{RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_SZ}};
-    let key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Daozai");
+    let key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Yunyu");
     let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)) else { return };
     let mut buffer = [0u16; 1024];
     let mut size = (buffer.len() * 2) as u32;
@@ -346,7 +346,7 @@ fn http_agent() -> Result<ureq::Agent, String> {
 
 fn check() -> Result<Option<Release>, String> {
     let response = http_agent()?
-        .get(API).set("User-Agent", concat!("Daozai/", env!("CARGO_PKG_VERSION")))
+        .get(API).set("User-Agent", concat!("Yunyu/", env!("CARGO_PKG_VERSION")))
         .set("Accept", "application/vnd.github+json").call().map_err(|error| match error {
             ureq::Error::Status(403 | 429, _) => "检查过于频繁，请稍后重试".to_owned(),
             ureq::Error::Status(404, _) => "暂未找到正式版本，请查看发布页".to_owned(),
@@ -375,7 +375,7 @@ fn release_info(value: &serde_json::Value, current: &str) -> Result<Option<Relea
 
 fn download(release: &Release, tx: &mpsc::Sender<Event>, cancel: &AtomicBool) -> Result<PathBuf, String> {
     let package = release.package.as_ref().ok_or("请通过浏览器下载此版本")?;
-    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or("无法找到更新缓存目录")?.join("Daozai/Updates");
+    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or("无法找到更新缓存目录")?.join("Yunyu/Updates");
     let work = root.join(format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
     std::fs::create_dir_all(&work).map_err(|_| "无法创建更新缓存")?;
     let result = (|| {
@@ -461,7 +461,7 @@ mod install_size_tests {
     fn install_size_counts_only_daozai_files() {
         let dir = std::env::temp_dir().join(format!("daozai-size-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("Other App")).unwrap();
-        std::fs::write(dir.join("daozai.exe"), vec![0u8; 3000]).unwrap();
+        std::fs::write(dir.join("yunyu.exe"), vec![0u8; 3000]).unwrap();
         std::fs::write(dir.join("LICENSE"), vec![0u8; 100]).unwrap();
         std::fs::write(dir.join("Other App").join("big.bin"), vec![0u8; 5 * 1024 * 1024]).unwrap();
         std::fs::write(dir.join("other.exe"), vec![0u8; 2 * 1024 * 1024]).unwrap();
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn automatic_notice_is_once_per_version_and_manual_check_can_reopen_it() {
-        let path=std::env::temp_dir().join(format!("daozai-update-check-{}.json",std::process::id()));
+        let path=std::env::temp_dir().join(format!("yunyu-update-check-{}.json",std::process::id()));
         let _=std::fs::remove_file(&path);
         for (automatic, version, expected) in [(true, "v0.6.65", true), (true, "v0.6.65", false),
             (true, "v0.6.66", true), (false, "v0.6.66", true)] {
@@ -708,8 +708,8 @@ mod tests {
     fn available_update_preview() {
         let dest = std::path::PathBuf::from(std::env::var_os("DAOZAI_UPDATE_PREVIEW_DIR").expect("需指定预览目录"));
         std::fs::create_dir_all(&dest).unwrap();
-        let old = std::env::var_os("DAOZAI_DATA_DIR");
-        std::env::set_var("DAOZAI_DATA_DIR", dest.join("data"));
+        let old = std::env::var_os("YUNYU_DATA_DIR");
+        std::env::set_var("YUNYU_DATA_DIR", dest.join("data"));
         let ctx = egui::Context::default();
         let mut app = crate::app::App::new(&ctx, Default::default());
         app.updates.result = Some(Ok(Some(Release { version: "v0.6.63".into(),
@@ -758,8 +758,8 @@ mod tests {
             raster.free_textures(&child.textures_delta);
         }
         }
-        if let Some(old) = old { std::env::set_var("DAOZAI_DATA_DIR", old); }
-        else { std::env::remove_var("DAOZAI_DATA_DIR"); }
+        if let Some(old) = old { std::env::set_var("YUNYU_DATA_DIR", old); }
+        else { std::env::remove_var("YUNYU_DATA_DIR"); }
     }
 }
 

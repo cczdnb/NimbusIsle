@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const SERVICE: &str = "Daozai.TodoSync";
+const SERVICE: &str = "Yunyu.TodoSync";
 const SCOPES: &str = "User.Read Tasks.ReadWrite offline_access";
 const AUTH: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
@@ -104,7 +104,7 @@ fn form(pairs: &[(&str, &str)]) -> String {
 fn token_request(body: &str) -> Result<Value, String> {
     let resp = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(30))
-        .user_agent(&format!("Daozai/{} (Windows; TodoSync)", env!("CARGO_PKG_VERSION")))
+        .user_agent(&format!("Yunyu/{} (Windows; TodoSync)", env!("CARGO_PKG_VERSION")))
         .build()
         .post(TOKEN)
         .set("Content-Type", "application/x-www-form-urlencoded")

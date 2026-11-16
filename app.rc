@@ -14,8 +14,8 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "FileDescription", "云屿"
-            VALUE "InternalName", "Daozai"
-            VALUE "OriginalFilename", "daozai.exe"
+            VALUE "InternalName", "Yunyu"
+            VALUE "OriginalFilename", "yunyu.exe"
             VALUE "ProductName", "云屿"
             VALUE "ProductVersion", "0.6.65"
             VALUE "FileVersion", "0.6.65"

@@ -1,19 +1,19 @@
 param([string]$SourceExecutable)
 if(-not $SourceExecutable){
-    $packaged=Join-Path $PSScriptRoot '..\daozai.exe'
-    $SourceExecutable=if(Test-Path -LiteralPath $packaged){$packaged}else{Join-Path $PSScriptRoot '..\target\release\daozai.exe'}
+    $packaged=Join-Path $PSScriptRoot '..\yunyu.exe'
+    $SourceExecutable=if(Test-Path -LiteralPath $packaged){$packaged}else{Join-Path $PSScriptRoot '..\target\release\yunyu.exe'}
 }
 $ErrorActionPreference='Stop'
 $sourcePath=[System.IO.Path]::GetFullPath($SourceExecutable)
 if(-not(Test-Path -LiteralPath $sourcePath)){throw '找不到云屿程序，请先完成构建。'}
-$installDir=Join-Path $env:LOCALAPPDATA 'Programs\Daozai'
-$exePath=Join-Path $installDir 'daozai.exe'
+$installDir=Join-Path $env:LOCALAPPDATA 'Programs\Yunyu'
+$exePath=Join-Path $installDir 'yunyu.exe'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-Get-Process daozai -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exePath} | ForEach-Object {
+Get-Process yunyu -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exePath} | ForEach-Object {
     $null=$_.CloseMainWindow()
     if(-not $_.WaitForExit(3000)){Stop-Process -Id $_.Id; $_.WaitForExit()}
 }
-if(Test-Path -LiteralPath $exePath){Copy-Item -LiteralPath $exePath -Destination (Join-Path $installDir 'daozai-previous.exe') -Force}
+if(Test-Path -LiteralPath $exePath){Copy-Item -LiteralPath $exePath -Destination (Join-Path $installDir 'yunyu-previous.exe') -Force}
 Copy-Item -LiteralPath $sourcePath -Destination $exePath -Force
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt') -Destination (Join-Path $installDir 'THIRD_PARTY_NOTICES.txt') -Force}
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $installDir 'LICENSE') -Force}
@@ -28,7 +28,7 @@ foreach($entry in $entries){
     $link=$shell.CreateShortcut($entry[0]);$link.TargetPath=$exePath;$link.Arguments=$entry[1]
     $link.WorkingDirectory=$installDir;$link.IconLocation=$exePath+',0';$link.Description='云屿';$link.Save()
 }
-$key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai'
+$key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Yunyu'
 New-Item -Path $key -Force | Out-Null
 $version=(Get-Item -LiteralPath $exePath).VersionInfo.FileVersion
 $psExe=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'

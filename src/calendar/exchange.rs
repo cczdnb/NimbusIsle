@@ -142,7 +142,7 @@ fn top_status(n: &Node) -> &str {
 fn command(agent: &ureq::Agent, cfg: &Config, password: &str, name: &str, root: &Node, policy: Option<&str>) -> Result<Node, Failure> {
     let mut target = endpoint(cfg)?;
     // 固定匿名设备标识，完整快照按顺序读取，不保存同步键或日程正文。
-    target.query_pairs_mut().extend_pairs([("Cmd", name), ("User", cfg.username.as_str()), ("DeviceId", "DaozaiCalendar01"), ("DeviceType", "Daozai")]);
+    target.query_pairs_mut().extend_pairs([("Cmd", name), ("User", cfg.username.as_str()), ("DeviceId", "YunyuCalendar01"), ("DeviceType", "Yunyu")]);
     let mut request = agent.post(target.as_str())
         .set("Authorization", &super::basic_auth(&cfg.username, password))
         .set("MS-ASProtocolVersion", "14.0")

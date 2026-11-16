@@ -62,7 +62,7 @@ fn main()->eframe::Result<()> {
     let args=std::env::args().collect::<Vec<_>>();let mode=args.get(1).cloned().unwrap_or_else(||"island".into());
     assert!(["island","expanded","disabled"].contains(&mode.as_str()));
     let seconds=args.get(2).map(|s|s.parse::<f64>().unwrap()).unwrap_or(120.0);
-    let cache=std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("Daozai/lyrics");
+    let cache=std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("Yunyu/lyrics");
     let lyrics=std::fs::read_dir(cache).unwrap().filter_map(|e|{
         let path=e.ok()?.path();if path.extension()?.to_str()? != "lrc"{return None;}
         let lyrics=daozai::lyrics::parse_lrc(&std::fs::read_to_string(path).ok()?);
@@ -71,7 +71,7 @@ fn main()->eframe::Result<()> {
     println!("cached_songs={}",lyrics.len());
     let root=std::env::temp_dir().join(format!("daozai-switch-memory-{}",std::process::id()));std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("settings.txt"),format!("lyrics_enabled={}\nisland_lyrics={}\npet=1\n",u8::from(mode!="disabled"),u8::from(mode=="island"))).unwrap();
-    std::env::set_var("DAOZAI_DATA_DIR",&root);
+    std::env::set_var("YUNYU_DATA_DIR",&root);
     let _monitor=daozai::resources::Monitor::start(root.join("diagnostics")).unwrap();
     let options=eframe::NativeOptions{vsync:false,viewport:egui::ViewportBuilder::default().with_title("云屿连续切歌检查").with_inner_size([daozai::app::CANVAS_W,WIN_H]).with_position([100.0,100.0]).with_decorations(false).with_transparent(true).with_active(false),..Default::default()};
     eframe::run_native("云屿连续切歌检查",options,Box::new(move|cc|{

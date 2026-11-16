@@ -18,7 +18,7 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use chrono::{Datelike, NaiveDate};
 
-pub const SERVICE: &str = "Daozai.Calendar";
+pub const SERVICE: &str = "Yunyu.Calendar";
 /// 开启自动同步时每 5 分钟更新一次。
 const SYNC_SECS: u64 = 300;
 /// 只取未来 24 小时。
@@ -536,7 +536,7 @@ fn agent() -> Result<ureq::Agent, Failure> {
         .timeout_write(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
         .redirects(0)
-        .user_agent(concat!("Daozai/",env!("CARGO_PKG_VERSION")));
+        .user_agent(concat!("Yunyu/",env!("CARGO_PKG_VERSION")));
     // 仅日历使用系统证书验证，继承用户已信任的自签证书和私有 CA。
     #[cfg(windows)]
     let builder = builder.tls_connector(std::sync::Arc::new(native_tls::TlsConnector::new()

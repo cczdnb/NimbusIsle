@@ -9,7 +9,7 @@ try {
     $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
     $targetDirectory = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR) } else { Join-Path $projectRoot 'target' }
     $privatePaths = @($targetDirectory, $projectRoot, $cargoHome, $env:USERPROFILE) | Where-Object { $_ } | Select-Object -Unique
-    $env:CARGO_ENCODED_RUSTFLAGS = @('-C', 'target-feature=+crt-static', "--remap-path-prefix=$cargoHome=cargo", "--remap-path-prefix=$projectRoot=daozai", '-C', 'link-arg=/PDBALTPATH:%_PDB%') -join [char]0x1f
+    $env:CARGO_ENCODED_RUSTFLAGS = @('-C', 'target-feature=+crt-static', "--remap-path-prefix=$cargoHome=cargo", "--remap-path-prefix=$projectRoot=yunyu", '-C', 'link-arg=/PDBALTPATH:%_PDB%') -join [char]0x1f
     if ($env:CARGO_TARGET_DIR) { $env:CARGO_ENCODED_RUSTFLAGS += [string][char]0x1f + "--remap-path-prefix=$targetDirectory=target" }
     if (-not $SkipBuild) {
         $env:CARGO_BUILD_JOBS = '1'
@@ -18,14 +18,14 @@ try {
         try {
             $trimFlags = $privatePaths | ForEach-Object { '"/d1trimfile:' + $_ + '"' }
             $env:CL = (@($originalCL) + $trimFlags) -join ' '
-            cargo +stable-x86_64-pc-windows-msvc build --locked --release --bin daozai --target x86_64-pc-windows-msvc
+            cargo +stable-x86_64-pc-windows-msvc build --locked --release --bin yunyu --target x86_64-pc-windows-msvc
             if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
         } finally {
             $env:CL = $originalCL
         }
     }
     if (-not $Executable) {
-        $Executable = Join-Path $targetDirectory 'x86_64-pc-windows-msvc\release\daozai.exe'
+        $Executable = Join-Path $targetDirectory 'x86_64-pc-windows-msvc\release\yunyu.exe'
     }
     $binary = Get-Item -LiteralPath $Executable
     & (Join-Path $PSScriptRoot 'check-runtime.ps1') -Executable $binary.FullName
@@ -50,12 +50,12 @@ try {
     $stagingDirectory = Join-Path $outputDirectory $packageName
     if (Test-Path -LiteralPath $stagingDirectory) { throw 'Package directory already exists' }
     New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-    Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $stagingDirectory 'daozai.exe')
+    Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $stagingDirectory 'yunyu.exe')
     # ZIP 保留给免安装使用和应用内更新；普通用户只需下载安装 EXE。
     @('LICENSE','THIRD_PARTY_NOTICES.txt') | ForEach-Object {
         Copy-Item -LiteralPath (Join-Path $projectRoot $_) -Destination $stagingDirectory -Recurse
     }
-    # 免安装包没有开始菜单：附带一个只调用 daozai.exe --collect-diagnostics 的 cmd，云屿打不开时双击收集。
+    # 免安装包没有开始菜单：附带一个只调用 yunyu.exe --collect-diagnostics 的 cmd，云屿打不开时双击收集。
     # 诊断脚本本身内嵌在程序里，不再单独附带，也就不会出现新程序配旧脚本。
     Copy-Item -LiteralPath (Join-Path $projectRoot 'installer\收集云屿诊断.cmd') -Destination $stagingDirectory
     $setup = Join-Path $outputDirectory "Yunyu-Setup-v$version-x64.exe"

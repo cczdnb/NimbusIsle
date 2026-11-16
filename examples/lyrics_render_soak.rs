@@ -32,7 +32,7 @@ fn main()->eframe::Result<()> {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
-    std::env::set_var("DAOZAI_DATA_DIR",std::env::temp_dir().join(format!("daozai-render-soak-{}",std::process::id())));
+    std::env::set_var("YUNYU_DATA_DIR",std::env::temp_dir().join(format!("daozai-render-soak-{}",std::process::id())));
     let options=eframe::NativeOptions{vsync:false,viewport:egui::ViewportBuilder::default().with_title("云屿性能检查").with_inner_size([daozai::app::CANVAS_W,WIN_H]).with_position([100.0,100.0]).with_decorations(false).with_transparent(true).with_active(false),..Default::default()};
     eframe::run_native("云屿性能检查",options,Box::new(|cc|{
         cc.egui_ctx.set_pixels_per_point(1.0);

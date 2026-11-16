@@ -561,7 +561,7 @@ impl Listener {
             let message=RegisterWindowMessageW(w!("SHELLHOOK"));
             if message==0{return Err(format!("无法注册{}提醒事件",source.name()));}
             let taskbar_created=RegisterWindowMessageW(w!("TaskbarCreated"));
-            let hwnd=CreateWindowExW(WS_EX_TOOLWINDOW,w!("STATIC"),w!("DaozaiWechatListener"),WS_POPUP,0,0,0,0,None,None,None,None).map_err(|_|format!("无法创建{}监听窗口",source.name()))?;
+            let hwnd=CreateWindowExW(WS_EX_TOOLWINDOW,w!("STATIC"),w!("YunyuWechatListener"),WS_POPUP,0,0,0,0,None,None,None,None).map_err(|_|format!("无法创建{}监听窗口",source.name()))?;
             // 云屿以管理员身份运行时，系统会拦下资源管理器发来的窗口事件；显式允许这两条消息。
             for allowed in [message,taskbar_created] {
                 let _=ChangeWindowMessageFilterEx(hwnd,allowed,MSGFLT_ALLOW,None);
@@ -599,7 +599,7 @@ mod tests {
         let instance=GetModuleHandleW(None).unwrap().into();let pid=std::process::id();
         for (source,class) in [(Messenger::Wechat,w!("WeChatMainWndForPC")),(Messenger::WeCom,w!("WeWorkWindow")),(Messenger::Feishu,w!("Chrome_WidgetWin_1")),(Messenger::DingTalk,w!("Qt51511QWindowIcon")),(Messenger::DingTalk,w!("StandardFrame_DingTalk"))]{
             RegisterClassW(&WNDCLASSW{lpfnWndProc:Some(proc),hInstance:instance,lpszClassName:class,..Default::default()});
-            let window=CreateWindowExW(WINDOW_EX_STYLE(0),class,w!("Daozai synthetic client"),WS_OVERLAPPEDWINDOW,-10000,-10000,400,500,None,None,instance,None).unwrap();
+            let window=CreateWindowExW(WINDOW_EX_STYLE(0),class,w!("Yunyu synthetic client"),WS_OVERLAPPEDWINDOW,-10000,-10000,400,500,None,None,instance,None).unwrap();
             let hwnd=CreateWindowExW(WS_EX_TOOLWINDOW,w!("STATIC"),w!(""),WS_POPUP,0,0,0,0,None,None,None,None).unwrap();
             let message=RegisterWindowMessageW(w!("SHELLHOOK"));
             let state=Box::new(RefCell::new(State{message,taskbar_created:RegisterWindowMessageW(w!("TaskbarCreated")),source,registered:true,paths:vec![normalized(&std::env::current_exe().unwrap().to_string_lossy())],burst:Vec::new(),pending:Vec::new(),ctx:Default::default()}));
@@ -622,7 +622,7 @@ mod tests {
         let instance=GetModuleHandleW(None).unwrap().into();let pid=std::process::id();
         for (source,class) in [(Messenger::WeCom,w!("WeWorkWindow")),(Messenger::Feishu,w!("Chrome_WidgetWin_1")),(Messenger::DingTalk,w!("Qt51511QWindowIcon"))]{
             RegisterClassW(&WNDCLASSW{lpfnWndProc:Some(proc),hInstance:instance,lpszClassName:class,..Default::default()});
-            let create=||CreateWindowExW(WINDOW_EX_STYLE(0),class,w!("Daozai synthetic client"),WS_OVERLAPPEDWINDOW,-10000,-10000,400,500,None,None,instance,None).unwrap();
+            let create=||CreateWindowExW(WINDOW_EX_STYLE(0),class,w!("Yunyu synthetic client"),WS_OVERLAPPEDWINDOW,-10000,-10000,400,500,None,None,instance,None).unwrap();
             let (first,second)=(create(),create());
             let hwnd=CreateWindowExW(WS_EX_TOOLWINDOW,w!("STATIC"),w!(""),WS_POPUP,0,0,0,0,None,None,None,None).unwrap();
             let message=RegisterWindowMessageW(w!("SHELLHOOK"));
@@ -780,10 +780,10 @@ mod tests {
                 }
                 unsafe extern "system" fn child_proc(h:HWND,m:u32,w:WPARAM,l:LPARAM)->LRESULT{DefWindowProcW(h,m,w,l)}
                 let instance=GetModuleHandleW(None).unwrap().into();
-                RegisterClassW(&WNDCLASSW{lpfnWndProc:Some(proc),hInstance:instance,lpszClassName:w!("DaozaiTrayFixture"),..Default::default()});
+                RegisterClassW(&WNDCLASSW{lpfnWndProc:Some(proc),hInstance:instance,lpszClassName:w!("YunyuTrayFixture"),..Default::default()});
                 RegisterClassW(&WNDCLASSW{lpfnWndProc:Some(child_proc),hInstance:instance,lpszClassName:w!("TrayNotifyWnd"),..Default::default()});
                 // 透明窗口只提供系统无障碍控件，不显示界面，也不抢占前台。
-                let window=CreateWindowExW(WS_EX_LAYERED|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,w!("DaozaiTrayFixture"),w!(""),WS_POPUP,10,10,240,220,None,None,instance,None).unwrap();
+                let window=CreateWindowExW(WS_EX_LAYERED|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,w!("YunyuTrayFixture"),w!(""),WS_POPUP,10,10,240,220,None,None,instance,None).unwrap();
                 SetLayeredWindowAttributes(window,COLORREF(0),0,LWA_ALPHA).unwrap();
                 SetWindowLongPtrW(window,GWLP_USERDATA,Arc::as_ptr(&received) as isize);
                 let parent=if legacy{CreateWindowExW(WINDOW_EX_STYLE(0),w!("TrayNotifyWnd"),w!(""),WS_CHILD|WS_VISIBLE,0,0,240,220,window,None,instance,None).unwrap()}else{window};

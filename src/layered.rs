@@ -119,7 +119,7 @@ fn create_display_window() -> windows::core::Result<HWND> {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     static CLASS: std::sync::Once = std::sync::Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
-    let class = windows::core::w!("DaozaiLayeredDisplay");
+    let class = windows::core::w!("YunyuLayeredDisplay");
     CLASS.call_once(|| unsafe {
         let wc = WNDCLASSW { lpfnWndProc: Some(display_proc), hInstance: instance.into(), lpszClassName: class, ..Default::default() };
         RegisterClassW(&wc);

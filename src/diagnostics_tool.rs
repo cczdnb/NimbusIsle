@@ -1,4 +1,4 @@
-//! 收集诊断：诊断脚本内嵌在程序里，`daozai.exe --collect-diagnostics` 直接运行，不依赖安装目录里的附带文件。
+//! 收集诊断：诊断脚本内嵌在程序里，`yunyu.exe --collect-diagnostics` 直接运行，不依赖安装目录里的附带文件。
 //!
 //! 两个入口共用这里：
 //! - 「设置 → 关于 → 收集诊断」：云屿能打开时用；
@@ -48,7 +48,7 @@ fn dirs_desktop()->Option<PathBuf> {
     }
 }
 
-/// 应用内按钮：另起一个 `daozai.exe --collect-diagnostics`，界面不等待，也不受当前窗口状态影响。
+/// 应用内按钮：另起一个 `yunyu.exe --collect-diagnostics`，界面不等待，也不受当前窗口状态影响。
 pub fn launch()->std::io::Result<()> {
     let exe=std::env::current_exe()?;
     std::process::Command::new(exe).arg(ARG).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_|())
@@ -59,8 +59,8 @@ mod tests {
     use super::*;
     #[test]
     fn only_the_explicit_switch_starts_collection(){
-        assert!(requested(["daozai.exe".to_string(),ARG.to_string()].into_iter()));
-        assert!(!requested(["daozai.exe".to_string(),"--settings".to_string()].into_iter()));
+        assert!(requested(["yunyu.exe".to_string(),ARG.to_string()].into_iter()));
+        assert!(!requested(["yunyu.exe".to_string(),"--settings".to_string()].into_iter()));
     }
     #[test]
     fn embedded_script_keeps_bom_and_collects_music_gaps(){

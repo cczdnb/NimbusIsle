@@ -1,6 +1,6 @@
 param(
     [string]$OutputDirectory = [Environment]::GetFolderPath('Desktop'),
-    [string]$DataDirectory = $(if ($env:DAOZAI_DATA_DIR) { $env:DAOZAI_DATA_DIR } else { Join-Path $env:APPDATA 'Daozai' }),
+    [string]$DataDirectory = $(if ($env:YUNYU_DATA_DIR) { $env:YUNYU_DATA_DIR } else { Join-Path $env:APPDATA 'Yunyu' }),
     [switch]$RevealArchive
 )
 $ErrorActionPreference = 'Stop'
@@ -54,7 +54,7 @@ try {
     }
     try {
         Add-Type -TypeDefinition 'public static class DaozaiDiagnosticGui { [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetGuiResources(System.IntPtr process, uint flags); }'
-        $info.Processes = @(Get-Process -Name daozai -ErrorAction SilentlyContinue | ForEach-Object {
+        $info.Processes = @(Get-Process -Name yunyu -ErrorAction SilentlyContinue | ForEach-Object {
             $processInfo = [ordered]@{ Id = $_.Id; StartedAt = $_.StartTime.ToString('o'); Handles = $_.HandleCount; Threads = $_.Threads.Count; PrivateBytes = $_.PrivateMemorySize64; WorkingBytes = $_.WorkingSet64 }
             try {
                 $processInfo.GdiObjects = [DaozaiDiagnosticGui]::GetGuiResources($_.Handle, 0)
@@ -66,11 +66,11 @@ try {
         })
     } catch { $info.ProcessQuery = '无法读取进程信息' }
     try {
-        $faultQuery = "*[System[(EventID=1000 or EventID=1001 or EventID=1002) and TimeCreated[timediff(@SystemTime) <= 604800000]] and EventData[Data[@Name='AppName']='daozai.exe' or Data[@Name='P1']='daozai.exe']]"
+        $faultQuery = "*[System[(EventID=1000 or EventID=1001 or EventID=1002) and TimeCreated[timediff(@SystemTime) <= 604800000]] and EventData[Data[@Name='AppName']='yunyu.exe' or Data[@Name='P1']='yunyu.exe']]"
         $info.ApplicationFaults = @(Get-WinEvent -LogName Application -FilterXPath $faultQuery -MaxEvents 30 -ErrorAction SilentlyContinue | ForEach-Object {
             $eventData = @{}
             foreach ($node in ([xml]$_.ToXml()).Event.EventData.Data) { if ($node.Name) { $eventData[[string]$node.Name] = $node.InnerText } }
-            if ($eventData.AppName -ine 'daozai.exe' -and $eventData.P1 -ine 'daozai.exe') { return }
+            if ($eventData.AppName -ine 'yunyu.exe' -and $eventData.P1 -ine 'yunyu.exe') { return }
             $fault = [ordered]@{ At = $_.TimeCreated.ToString('o'); EventId = $_.Id; Provider = $_.ProviderName }
             foreach ($key in @('AppName', 'AppVersion', 'ModuleName', 'ModuleVersion', 'ExceptionCode', 'FaultingOffset', 'EventName', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8')) {
                 if ($eventData.ContainsKey($key)) { $fault[$key] = $eventData[$key] }

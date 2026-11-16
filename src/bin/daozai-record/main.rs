@@ -1,7 +1,7 @@
 //! 演示录制器：不开窗口，脚本驱动鼠标/键盘/拖放，egui 输出用软件光栅化，
 //! 逐帧把 RGBA 写到 stdout（或直接拉起 ffmpeg）。
 //!
-//! 用法：`cargo run --release --features record --bin daozai-record -- out.mp4`
+//! 用法：`cargo run --release --features record --bin yunyu-record -- out.mp4`
 //! 需要 PATH 里有 ffmpeg。画面里的歌曲、文件、待办都是演示用的假数据。
 
 mod raster;
@@ -110,7 +110,7 @@ fn setup_data() -> (PathBuf, PathBuf) {
     hours[13] = 200;
     let hs: Vec<String> = hours.iter().map(|h| h.to_string()).collect();
     std::fs::write(data.join("water-extra.txt"), format!("drunk=750\nrefills=0\nremind=1\nhours={}\n", hs.join(","))).unwrap();
-    std::env::set_var("DAOZAI_DATA_DIR", &data);
+    std::env::set_var("YUNYU_DATA_DIR", &data);
     (root, drag)
 }
 

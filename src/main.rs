@@ -1025,6 +1025,7 @@ mod open_path_tests {
 
 fn main() -> std::process::ExitCode {
     diagnostics::install();
+    daozai::model::migrate_legacy_data();
     // 收集诊断：在单实例检查、创建窗口和初始化显卡之前处理，云屿启动即崩溃、卡死时也能用。
     #[cfg(windows)]
     if daozai::diagnostics_tool::requested(std::env::args()) {
@@ -1045,11 +1046,11 @@ fn main() -> std::process::ExitCode {
 fn run() -> eframe::Result<()> {
     // 自动重启或「立即重启」拉起的新进程：先等旧进程退出，再做单实例检查。
     diagnostics::wait_for_previous_instance();
-    // 单实例（与原版同名互斥体）
+    // 单实例。互斥体使用云屿自己的名字，不和原版岛仔抢同一把锁。
     #[cfg(windows)]
     if !daozai::tray::single_instance() {
         if !daozai::tray::activate_existing(std::env::args().any(|arg|arg=="--calendar")) {
-            diagnostics::report("云屿已在运行，但暂时无法打开窗口。\n请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 daozai.exe 后重试。", "已有实例可能正在启动或已无响应。请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 daozai.exe，再重新启动。");
+            diagnostics::report("云屿已在运行，但暂时无法打开窗口。\n请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 yunyu.exe 后重试。", "已有实例可能正在启动或已无响应。请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 yunyu.exe，再重新启动。");
         }
         return Ok(());
     }

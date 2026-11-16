@@ -1127,7 +1127,7 @@ struct H {
 impl H {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("daozai-test-{}-{}", std::process::id(), rand_id()));
-        std::env::set_var("DAOZAI_DATA_DIR", &dir);
+        std::env::set_var("YUNYU_DATA_DIR", &dir);
         let ctx = egui::Context::default();
         let app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 1e9 });
         Self { ctx, app, t: 0.0, cursor: None,cmds:vec![],region:Rect::NOTHING,hit:Rect::NOTHING,animating:false,shapes:Vec::new(), bt:Vec::new(),media:Default::default(),power:(None,false),network:None,system_idle:None,screen_locked:false,fullscreen:false,browser_at_top:None,file_drop_zone:None,hovered_files:vec![],dropped_files:vec![] }
@@ -3651,8 +3651,8 @@ fn kiro_connection_save_failure_keeps_the_original_account_and_cache(){
     h.app.quota.config.accounts.push(account.clone());h.app.quota.rows.insert(account.id.clone(),Ok(snapshot.clone()));let saved=h.app.quota.config.clone();
     let(connect,tx)=crate::quota::kiro::Connect::pending(Some(account));h.app.quota.kiro_connecting=Some(connect);
     tx.send(Ok(crate::quota::kiro::Connected{source:"new.json".into(),label:"新备注".into(),snapshot})).unwrap();
-    let original=std::env::var_os("DAOZAI_DATA_DIR").unwrap();std::fs::create_dir_all(&original).unwrap();let blocked=std::path::PathBuf::from(&original).join("kiro-blocked");std::fs::write(&blocked,"blocked").unwrap();std::env::set_var("DAOZAI_DATA_DIR",&blocked);
-    h.app.quota_tick();std::env::set_var("DAOZAI_DATA_DIR",original);
+    let original=std::env::var_os("YUNYU_DATA_DIR").unwrap();std::fs::create_dir_all(&original).unwrap();let blocked=std::path::PathBuf::from(&original).join("kiro-blocked");std::fs::write(&blocked,"blocked").unwrap();std::env::set_var("YUNYU_DATA_DIR",&blocked);
+    h.app.quota_tick();std::env::set_var("YUNYU_DATA_DIR",original);
     assert_eq!(h.app.quota.config,saved);assert!(h.app.quota.note.contains("配置目录"));assert_eq!(h.app.quota.rows["kiro"].as_ref().unwrap().windows[0].amount.as_ref().unwrap().remaining,900.0);
 }
 

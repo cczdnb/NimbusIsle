@@ -73,7 +73,7 @@ impl SyncOutcome {
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(45))
-        .user_agent(&format!("Daozai/{} (Windows; TodoSync)", env!("CARGO_PKG_VERSION")))
+        .user_agent(&format!("Yunyu/{} (Windows; TodoSync)", env!("CARGO_PKG_VERSION")))
         .build()
 }
 

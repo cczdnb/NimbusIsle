@@ -10,7 +10,7 @@ set "CARGO_BUILD_JOBS=1"
 where cargo >nul 2>nul || set CARGO=%USERPROFILE%\.cargo\bin\cargo.exe
 echo [%date% %time%] 开始编译 > "%LOG%"
 "%CARGO%" --version >> "%LOG%" 2>&1
-"%CARGO%" +stable-x86_64-pc-windows-msvc build --locked --release --bin daozai --target x86_64-pc-windows-msvc >> "%LOG%" 2>&1
+"%CARGO%" +stable-x86_64-pc-windows-msvc build --locked --release --bin yunyu --target x86_64-pc-windows-msvc >> "%LOG%" 2>&1
 set "BUILD_EXIT=%errorlevel%"
 echo EXIT=%BUILD_EXIT% >> "%LOG%"
 echo [%date% %time%] 结束 >> "%LOG%"

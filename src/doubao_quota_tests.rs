@@ -194,9 +194,9 @@ fn with_data_dir(run: impl FnOnce()) {
     let root = std::env::temp_dir().canonicalize().unwrap();
     let dir = root.join(format!("daozai-doubao-tests-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     fs::create_dir(&dir).unwrap();
-    let previous = std::env::var_os("DAOZAI_DATA_DIR"); std::env::set_var("DAOZAI_DATA_DIR",&dir);
+    let previous = std::env::var_os("YUNYU_DATA_DIR"); std::env::set_var("YUNYU_DATA_DIR",&dir);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
-    match previous { Some(previous)=>std::env::set_var("DAOZAI_DATA_DIR",previous),None=>std::env::remove_var("DAOZAI_DATA_DIR") }
+    match previous { Some(previous)=>std::env::set_var("YUNYU_DATA_DIR",previous),None=>std::env::remove_var("YUNYU_DATA_DIR") }
     assert!(dir.canonicalize().unwrap().starts_with(&root));
     fs::remove_dir_all(&dir).unwrap();
     if let Err(error) = result { std::panic::resume_unwind(error); }

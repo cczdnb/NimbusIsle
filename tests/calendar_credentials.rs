@@ -9,7 +9,7 @@ fn failed_configuration_preserves_old_credentials() {
     let id = format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
     let path = std::env::temp_dir().join(format!("daozai-credential-test-{id}"));
     std::fs::write(&path, "不是目录").unwrap();
-    std::env::set_var("DAOZAI_DATA_DIR", &path);
+    std::env::set_var("YUNYU_DATA_DIR", &path);
     let old = Config { provider: Provider::Feishu, username: format!("test-old-{id}"), href: None, server: None };
     let new = Config { username: format!("test-new-{id}"), ..old.clone() };
     calendar::secrets::save(&old, "旧密码").unwrap();
@@ -29,7 +29,7 @@ fn calendar_platform_connections_are_independent() {
     let id = format!("platforms-{}", std::process::id());
     let path = std::env::temp_dir().join(format!("daozai-{id}"));
     std::fs::create_dir_all(&path).unwrap();
-    std::env::set_var("DAOZAI_DATA_DIR", &path);
+    std::env::set_var("YUNYU_DATA_DIR", &path);
     let feishu = Config { provider: Provider::Feishu, username: format!("feishu-{id}"), href: None, server: None };
     let ding = Config { provider: Provider::DingTalk, username: format!("ding-{id}"), href: None, server: None };
     calendar::save_connection(&feishu, "飞书测试密码", None).unwrap();
