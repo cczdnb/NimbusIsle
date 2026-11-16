@@ -1,8 +1,8 @@
-﻿param([Parameter(Mandatory=$true)][string]$NsisCompiler)
+param([Parameter(Mandatory=$true)][string]$NsisCompiler)
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
 $id = 'DaozaiSetupTest' + [Guid]::NewGuid().ToString('N')
-$name = '岛仔安装测试-' + $id.Substring(15,8)
+$name = '云屿安装测试-' + $id.Substring(15,8)
 $root = Join-Path $project ('target\' + $id)
 $installed = Join-Path $root 'installed files'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $id
@@ -91,7 +91,7 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $installed 'user-file.txt'))) { throw '卸载误删额外文件' }
     if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'keep-user-data') { throw '卸载误删用户数据' }
     Write-Output '通过：原生卸载、保留用户数据和额外文件'
-    # 选了装着其他软件的共享文件夹：自动装进其中的专用子文件夹，登记大小只算岛仔自己的文件。
+    # 选了装着其他软件的共享文件夹：自动装进其中的专用子文件夹，登记大小只算云屿自己的文件。
     $shared = Join-Path $root 'shared apps'
     New-Item -ItemType Directory -Path (Join-Path $shared 'Other App') -Force | Out-Null
     [IO.File]::WriteAllBytes((Join-Path $shared 'Other App\big.bin'), (New-Object byte[] (40MB)))
@@ -102,7 +102,7 @@ try {
     Assert-Installed
     if (Test-Path -LiteralPath (Join-Path $shared 'daozai.exe')) { throw '程序被直接装进了共享文件夹' }
     if ((Get-ItemProperty -LiteralPath $key).EstimatedSize -ge 40000) { throw '登记大小把共享文件夹里的其他软件算了进去' }
-    Write-Output '通过：共享文件夹自动建立专用子文件夹、登记大小只算岛仔'
+    Write-Output '通过：共享文件夹自动建立专用子文件夹、登记大小只算云屿'
     Run-Setup -UseRegisteredPath
     Assert-Installed
     Write-Output '通过：专用子文件夹原地升级'

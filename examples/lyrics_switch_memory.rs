@@ -73,8 +73,8 @@ fn main()->eframe::Result<()> {
     std::fs::write(root.join("settings.txt"),format!("lyrics_enabled={}\nisland_lyrics={}\npet=1\n",u8::from(mode!="disabled"),u8::from(mode=="island"))).unwrap();
     std::env::set_var("DAOZAI_DATA_DIR",&root);
     let _monitor=daozai::resources::Monitor::start(root.join("diagnostics")).unwrap();
-    let options=eframe::NativeOptions{vsync:false,viewport:egui::ViewportBuilder::default().with_title("岛仔连续切歌检查").with_inner_size([daozai::app::CANVAS_W,WIN_H]).with_position([100.0,100.0]).with_decorations(false).with_transparent(true).with_active(false),..Default::default()};
-    eframe::run_native("岛仔连续切歌检查",options,Box::new(move|cc|{
+    let options=eframe::NativeOptions{vsync:false,viewport:egui::ViewportBuilder::default().with_title("云屿连续切歌检查").with_inner_size([daozai::app::CANVAS_W,WIN_H]).with_position([100.0,100.0]).with_decorations(false).with_transparent(true).with_active(false),..Default::default()};
+    eframe::run_native("云屿连续切歌检查",options,Box::new(move|cc|{
         cc.egui_ctx.set_pixels_per_point(1.0);
         if let Some(gl)=&cc.gl{use eframe::glow::HasContext;println!("renderer={}",unsafe{gl.get_parameter_string(eframe::glow::RENDERER)});}
         let app=App::new(&cc.egui_ctx,Options{fetch_lyrics:false,pet_idle:1e9});let native=daozai::native::Window::new(cc).unwrap();

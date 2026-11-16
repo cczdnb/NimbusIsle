@@ -137,7 +137,7 @@ pub struct Env {
     pub screen_locked: bool,
     /// 因「全屏时隐藏」而隐藏岛体，沿用外壳对设置和所在屏幕的判断。
     pub fullscreen_hidden: bool,
-    /// 前台浏览器的顶部是否与岛重叠；岛仔自身窗口或暂不可读时为 None。
+    /// 前台浏览器的顶部是否与岛重叠；云屿自身窗口或暂不可读时为 None。
     pub browser_at_top: Option<bool>,
     pub media: NowPlaying,
     /// 系统主音量（0..100, 是否静音）；v0.5.4 音量条与系统双向同步。
@@ -219,7 +219,7 @@ pub enum Cmd {
     CalendarForget,
     /// 选择 .ics 文件导入本机日程。
     CalendarImport,
-    /// 重启岛仔（切换渲染方式后生效）。
+    /// 重启云屿（切换渲染方式后生效）。
     RestartApp,
 }
 
@@ -3352,7 +3352,7 @@ impl App {
             6 => ("AI", "额度", theme::SOFT_GREEN),
             8 if self.weather.solar_open => ("日出", "日落", theme::YELLOW),
             8 => ("当地", "天气", theme::CYAN),
-            _ => ("岛仔", "设置", theme::WHITE),
+            _ => ("云屿", "设置", theme::WHITE),
         };
         let wa = c.text(15.0, base, a, size::TITLE, W::Bold, theme::WHITE, H::Left);
         if !b.is_empty() {

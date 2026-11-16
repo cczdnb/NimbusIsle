@@ -15,7 +15,7 @@
 ## 2. 不再接触其他软件
 
 1. 打开企业微信、浏览器等软件，再播放网易云或酷狗。
-2. 用 Process Explorer（Sysinternals）选中岛仔进程，打开下方 Handles 视图，筛选类型为 Process 的句柄。
+2. 用 Process Explorer（Sysinternals）选中云屿进程，打开下方 Handles 视图，筛选类型为 Process 的句柄。
 3. 预期：带内存读取权限的句柄只指向网易云 / 酷狗；企业微信等其他进程最多只出现“有限查询”权限的短暂句柄。
 
 结果：☐

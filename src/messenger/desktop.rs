@@ -142,7 +142,7 @@ fn open(unread:Unread,paths:&[String],_:bool)->Result<(),OpenError>{unsafe{
 
 #[derive(Debug,PartialEq,Eq)]
 enum WakeRoute {Focus,Restore,Show,Relaunch}
-/// 怎样把主窗口带到前台。飞书关到托盘后窗口被隐藏，若由岛仔直接 `ShowWindow`，飞书不会恢复渲染，
+/// 怎样把主窗口带到前台。飞书关到托盘后窗口被隐藏，若由云屿直接 `ShowWindow`，飞书不会恢复渲染，
 /// 页面停在加载骨架、点击无响应（#181，本机飞书 8.6 复现）；改为再启动一次飞书主程序，由飞书自己显示原窗口。
 /// 最小化的窗口照常还原（实测正常）；其他客户端未验证，保持原做法。
 fn wake_route(source:Messenger,visible:bool,iconic:bool)->WakeRoute {
@@ -190,12 +190,12 @@ mod tests{
     }
     #[test]
     fn feishu_in_tray_is_shown_by_feishu_itself(){
-        assert_eq!(wake_route(Messenger::Feishu,false,false),WakeRoute::Relaunch,"关到托盘的飞书不能由岛仔直接显示（#181 卡死）");
+        assert_eq!(wake_route(Messenger::Feishu,false,false),WakeRoute::Relaunch,"关到托盘的飞书不能由云屿直接显示（#181 卡死）");
         assert_eq!(wake_route(Messenger::Feishu,true,true),WakeRoute::Restore,"最小化的飞书照常还原");
         assert_eq!(wake_route(Messenger::Feishu,true,false),WakeRoute::Focus);
         for client in [Messenger::DingTalk,Messenger::WeCom] {assert_eq!(wake_route(client,false,false),WakeRoute::Show,"其他客户端未验证，保持原做法");}
     }
-    /// 本机实测：先把飞书关到托盘，再运行 `cargo test live_feishu -- --ignored`，走岛仔点提醒时的同一条唤起路径。
+    /// 本机实测：先把飞书关到托盘，再运行 `cargo test live_feishu -- --ignored`，走云屿点提醒时的同一条唤起路径。
     #[test]
     #[ignore="需要本机飞书已登录并关到托盘"]
     fn live_feishu_tray_window_is_shown_by_feishu(){unsafe{

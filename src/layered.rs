@@ -6,16 +6,16 @@
 //!
 //! 现在的做法：
 //! - 画面变化时把渲染结果读回（已预乘 alpha），交给一个只负责显示的分层窗口，
-//!   它紧贴在岛仔窗口正上方、鼠标一律穿透，边缘保留抗锯齿；
-//! - 岛仔窗口本身设成整体不透明度 1/255 的分层窗口：交换链的画面几乎完全看不见，
+//!   它紧贴在云屿窗口正上方、鼠标一律穿透，边缘保留抗锯齿；
+//! - 云屿窗口本身设成整体不透明度 1/255 的分层窗口：交换链的画面几乎完全看不见，
 //!   但仍按原来的窗口区域与命中区接收点击、悬停和拖放（不透明度为 0 时系统不再命中）。
-//!   直接对岛仔窗口用 `UpdateLayeredWindow` 不行：翻转模型交换链的画面会盖过分层内容。
+//!   直接对云屿窗口用 `UpdateLayeredWindow` 不行：翻转模型交换链的画面会盖过分层内容。
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-/// 岛仔窗口的整体不透明度：1/255 仍可命中，交换链画面肉眼不可见。
+/// 云屿窗口的整体不透明度：1/255 仍可命中，交换链画面肉眼不可见。
 const OWNER_ALPHA: u8 = 1;
 
 /// 读回画面的哈希：画面没变时不必重设分层窗口，也不再请求下一次读回。
@@ -136,7 +136,7 @@ fn create_display_window() -> windows::core::Result<HWND> {
     }
 }
 
-/// 让岛仔窗口自身几乎不可见但仍可命中；winit 改样式时可能抹掉分层位，每帧兜底。
+/// 让云屿窗口自身几乎不可见但仍可命中；winit 改样式时可能抹掉分层位，每帧兜底。
 unsafe fn hide_owner(owner: HWND) -> windows::core::Result<()> {
     let ex = GetWindowLongPtrW(owner, GWL_EXSTYLE);
     if ex & WS_EX_LAYERED.0 as isize == 0 {
@@ -217,7 +217,7 @@ impl Layered {
     }
 
     /// 把一帧（RGBA，已预乘）交给显示窗口。画面没变返回 Ok(false)；
-    /// 尺寸与岛仔窗口当前大小不符（读回之后窗口又改了大小）时跳过，等下一帧。
+    /// 尺寸与云屿窗口当前大小不符（读回之后窗口又改了大小）时跳过，等下一帧。
     pub fn present(&mut self, owner: HWND, size: [usize; 2], rgba: &[u8]) -> windows::core::Result<bool> {
         let (w, h) = (size[0] as i32, size[1] as i32);
         let mut rect = RECT::default();
@@ -235,7 +235,7 @@ impl Layered {
             let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
             let (src, dst_pos, sz) = (POINT::default(), POINT { x: rect.left, y: rect.top }, SIZE { cx: w, cy: h });
             UpdateLayeredWindow(self.display, None, Some(&dst_pos), Some(&sz), self.dc, Some(&src), COLORREF(0), Some(&blend), ULW_ALPHA)?;
-            // 显示窗口有了内容之后才把岛仔窗口自身藏起来，避免切换瞬间什么都看不到。
+            // 显示窗口有了内容之后才把云屿窗口自身藏起来，避免切换瞬间什么都看不到。
             hide_owner(owner)?;
         }
         self.last = Some(hash);
@@ -243,7 +243,7 @@ impl Layered {
         Ok(true)
     }
 
-    /// 每帧跟随岛仔窗口：可见性、位置，以及紧贴在它正上方的层级。
+    /// 每帧跟随云屿窗口：可见性、位置，以及紧贴在它正上方的层级。
     pub fn sync(&mut self, owner: HWND, raise: bool) {
         if self.last.is_none() { return; }
         unsafe {
@@ -260,14 +260,14 @@ impl Layered {
             if (o.left, o.top) != (d.left, d.top) || !display_visible || raise {
                 let _ = SetWindowPos(self.display, HWND_TOPMOST, o.left, o.top, 0, 0, flags | SWP_SHOWWINDOW);
             }
-            // 岛仔窗口紧贴在显示窗口下面：别的置顶窗口不会夹在两者之间。
+            // 云屿窗口紧贴在显示窗口下面：别的置顶窗口不会夹在两者之间。
             if next_visible(self.display) != Some(owner) {
                 let _ = SetWindowPos(owner, self.display, 0, 0, 0, 0, flags | SWP_NOMOVE);
             }
         }
     }
 
-    /// 放弃分层显示，岛仔窗口恢复为普通窗口（回到轮廓裁剪）。
+    /// 放弃分层显示，云屿窗口恢复为普通窗口（回到轮廓裁剪）。
     pub fn detach(&mut self, owner: HWND) {
         unsafe {
             let ex = GetWindowLongPtrW(owner, GWL_EXSTYLE);
@@ -408,9 +408,9 @@ mod tests {
             assert!(layered.present(owner, [4, 2], &px).unwrap());
             let mut alpha = 0u8;
             GetLayeredWindowAttributes(owner, None, Some(&mut alpha), None).unwrap();
-            assert_eq!(alpha, OWNER_ALPHA, "岛仔窗口几乎不可见，但不能是 0（否则点不到）");
+            assert_eq!(alpha, OWNER_ALPHA, "云屿窗口几乎不可见，但不能是 0（否则点不到）");
             assert!(IsWindowVisible(layered.display()).as_bool());
-            assert_eq!(next_visible(layered.display()), Some(owner), "岛仔窗口紧贴在显示窗口下面");
+            assert_eq!(next_visible(layered.display()), Some(owner), "云屿窗口紧贴在显示窗口下面");
             assert!(!layered.present(owner, [4, 2], &px).unwrap(), "同一画面不重复提交");
             assert!(!layered.present(owner, [8, 1], &[0u8; 32]).unwrap(), "尺寸与窗口不符时跳过");
             SetWindowPos(owner, None, -9000, -9000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE).unwrap();
@@ -420,7 +420,7 @@ mod tests {
             assert_eq!((d.left, d.top), (-9000, -9000), "窗口移动后显示窗口跟随");
             let _ = ShowWindow(owner, SW_HIDE);
             layered.sync(owner, false);
-            assert!(!IsWindowVisible(layered.display()).as_bool(), "岛仔窗口隐藏时显示窗口一起隐藏");
+            assert!(!IsWindowVisible(layered.display()).as_bool(), "云屿窗口隐藏时显示窗口一起隐藏");
             layered.detach(owner);
             assert!(GetWindowLongPtrW(owner, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize == 0);
             let _ = DestroyWindow(owner);

@@ -219,11 +219,11 @@ struct Foreground {
     app_window: bool,
 }
 
-/// 前台从全屏窗口切到别的窗口时，是否仍按原来的全屏处理（岛仔保持隐藏）。
+/// 前台从全屏窗口切到别的窗口时，是否仍按原来的全屏处理（云屿保持隐藏）。
 ///
 /// 3ds Max、Photoshop 这类软件全屏（或最大化后盖满整块屏幕）时，插件面板、浮动工具条、
 /// 属性对话框都是同一个程序的附属窗口；每点一下前台就在它们和主窗口之间来回切，
-/// 过去岛仔会跟着「出现 → 消失」闪一次。只要原来的全屏窗口还盖着屏幕，
+/// 过去云屿会跟着「出现 → 消失」闪一次。只要原来的全屏窗口还盖着屏幕，
 /// 而新的前台是它的附属窗口（被它拥有，或同一程序里不单独占任务栏的窗口），就继续隐藏。
 /// 切到另一个程序、或同一程序里另开的普通窗口（如浏览器的新窗口）时照常显示。
 fn keeps_fullscreen(last: Foreground, still_covers: bool, now: Option<Foreground>) -> bool {
@@ -279,7 +279,7 @@ pub fn fullscreen() -> Option<crate::display_layout::Bounds> {
         let hwnd = GetForegroundWindow();
         let now = (!hwnd.0.is_null()).then(|| foreground_info(hwnd));
         if let Some(info) = now {
-            // 岛仔自己的窗口（设置窗口等）不算全屏，也不沿用。
+            // 云屿自己的窗口（设置窗口等）不算全屏，也不沿用。
             if info.pid == windows::Win32::System::Threading::GetCurrentProcessId() {
                 *last = None;
                 return None;

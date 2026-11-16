@@ -252,9 +252,9 @@ fn wait_for_code(listener: &TcpListener) -> Result<String, String> {
         }
     }
     let html = if code.is_some() {
-        "<!doctype html><meta charset=utf-8><title>岛仔</title><body style='font-family:sans-serif;padding:40px'>已完成微软账号授权，可以关闭此页，返回岛仔。</body>"
+        "<!doctype html><meta charset=utf-8><title>云屿</title><body style='font-family:sans-serif;padding:40px'>已完成微软账号授权，可以关闭此页，返回云屿。</body>"
     } else {
-        "<!doctype html><meta charset=utf-8><title>岛仔</title><body style='font-family:sans-serif;padding:40px'>授权未完成，可以关闭此页，返回岛仔重试。</body>"
+        "<!doctype html><meta charset=utf-8><title>云屿</title><body style='font-family:sans-serif;padding:40px'>授权未完成，可以关闭此页，返回云屿重试。</body>"
     };
     let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
     let _ = stream.write_all(resp.as_bytes());

@@ -142,7 +142,7 @@ pub struct Connection<T: Read + Write> {
     /// Tracks if we have read a greeting.
     pub greeting_read: bool,
 
-    /// 岛仔补丁：一条响应没能完整读完（解析失败、标签错位、读写中断）后，流里残留的数据
+    /// 云屿补丁：一条响应没能完整读完（解析失败、标签错位、读写中断）后，流里残留的数据
     /// 会和下一条命令的响应错位。原版此时在下一次读取时 `assert_eq!` 标签而 panic，发布版
     /// `panic = "abort"` 会直接结束整个程序。这里改为标记连接已失步，之后的命令一律返回
     /// `ConnectionLost`，由调用方重新连接。

@@ -32,7 +32,7 @@ fn gemini_connect_form_opens_default_browser_without_claiming_connection(){
         assert!(texts.contains(&"打开默认浏览器登录"),"Gemini 应在系统默认浏览器中登录");
         assert!(texts.contains(&"连接已登录的 Chrome"),"Gemini 应支持本人授权连接现有 Chrome 会话");
         assert!(texts.iter().any(|s|s.contains("chrome://inspect/#remote-debugging")),"首次连接应提供 Chrome 原生设置入口");
-        assert!(!texts.iter().any(|s|s.contains("自动连接")),"打开官网不能表示岛仔已获得登录会话");
+        assert!(!texts.iter().any(|s|s.contains("自动连接")),"打开官网不能表示云屿已获得登录会话");
         assert!(!texts.iter().any(|s|s.contains("Kimi 浏览器扩展")),"Gemini 连接不应要求额外安装扩展");
         assert!(texts.contains(&"Google 邮箱"));
         let original=h.app.quota.config.clone();
@@ -631,7 +631,7 @@ fn top_bar_settings_switch_modes_and_respect_the_master_switch(){
         h.app.settings.settings_theme=if dark{crate::settings_theme::SettingsTheme::Dark}else{crate::settings_theme::SettingsTheme::Light};
         let mut raster=crate::preview_raster::Raster::new(690,1800);
         for _ in 0..3{let _=draw(&mut h,vec![],&mut raster);}
-        for (on_top,label) in [(true,"岛仔置顶"),(false,"避开顶栏")] {
+        for (on_top,label) in [(true,"云屿置顶"),(false,"避开顶栏")] {
             let output=draw(&mut h,vec![],&mut raster);
             let position=output.shapes.iter().find_map(|s|match &s.shape{egui::Shape::Text(t)if t.galley.text()==label=>{
                 assert!(s.clip_rect.contains_rect(t.visual_bounding_rect()),"显示方式按钮不能裁切");Some(t.visual_bounding_rect().center())
@@ -647,7 +647,7 @@ fn top_bar_settings_switch_modes_and_respect_the_master_switch(){
         }
         h.app.settings.avoid_top_bar=false;
         let output=draw(&mut h,vec![],&mut raster);
-        assert!(!output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t)if t.galley.text()=="岛仔置顶")),"关闭适配后收起显示方式选项");
+        assert!(!output.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t)if t.galley.text()=="云屿置顶")),"关闭适配后收起显示方式选项");
     }
 }
 
@@ -2372,7 +2372,7 @@ fn browser_minimal_preserves_preferences_and_restores_the_previous_mode(){
     let saved=crate::model::Settings::load();
     assert!(saved.browser_minimal && saved.pet && !saved.minimal,"应只持久化开关，保留原模式");
     h.browser_at_top=None;for _ in 0..30 {h.frame(vec![]);}
-    assert!(h.hit.height()<10.0,"打开岛仔设置或托盘时应保留浏览器避让状态");
+    assert!(h.hit.height()<10.0,"打开云屿设置或托盘时应保留浏览器避让状态");
     h.browser_at_top=Some(false);for _ in 0..90 {h.frame(vec![]);}
     assert!(h.app.pet_enabled() && h.hit.height()>20.0,"离开浏览器或还原窗口后应恢复");
     h.browser_at_top=Some(true);for _ in 0..90 {h.frame(vec![]);}
@@ -2489,7 +2489,7 @@ fn island_lyrics_mascot_sits_left_of_the_cover(){
         artwork:Some(std::sync::Arc::new(egui::ColorImage::new([32,32],egui::Color32::from_rgb(70,120,220)))),..Default::default()};
     h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc("[00:05]晚风吹过了山岗\n[00:15]下一句"));
     for _ in 0..120 {h.frame(vec![]);}
-    assert!((h.app.current_width()-348.0).abs()<0.1,"专辑、岛仔与原有歌词宽度一起保留");
+    assert!((h.app.current_width()-348.0).abs()<0.1,"专辑、云屿与原有歌词宽度一起保留");
     let texture=h.app.music_artwork.as_ref().unwrap().1.id();
     let cover=h.shapes.iter().find_map(|s|match &s.shape{
         egui::Shape::Rect(r) if r.brush.as_ref().is_some_and(|b|b.fill_texture_id==texture)=>Some(r.rect),
@@ -4311,9 +4311,9 @@ fn mascot_stays_beside_the_clock_and_all_resident_components(){
     h.app.pomo.running=true;h.app.pomo.remaining=1200.0;
     for _ in 0..120 {h.frame(vec![]);}let width=h.app.current_width();
     h.app.settings.pet=true;for _ in 0..120 {h.frame(vec![]);}
-    assert!((h.app.current_width()-width-44.0).abs()<0.1,"岛仔应有独立常驻位置");
+    assert!((h.app.current_width()-width-44.0).abs()<0.1,"云屿应有独立常驻位置");
     assert_eq!(h.quota_centers().len(),5,"播放中五个常驻账号仍显示额度环");
-    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="09:41")),"岛仔与时钟共存");
+    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="09:41")),"云屿与时钟共存");
     assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="Track")),"媒体条加在下方，不挤掉吉祥物和额度");
     assert!(h.app.current_height()>crate::app::BAR_H+20.0,"播放中加高");
     assert!(h.shapes.iter().filter(|s|matches!(&s.shape,egui::Shape::Path(p) if p.points.len()==13 && (p.stroke.width-3.6).abs()<0.01)).count()>=2,"没有闲置或悬停也应显示眼睛");
@@ -4327,15 +4327,15 @@ fn mascot_and_album_share_the_single_line_lyric_island(){
         artwork:Some(std::sync::Arc::new(egui::ColorImage::new([32,32],egui::Color32::from_rgb(70,120,220)))),..Default::default()};
     h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc("[00:05]晚风吹过了山岗\n[00:15]下一句"));
     for _ in 0..120 {h.frame(vec![]);}
-    assert!((h.app.current_width()-348.0).abs()<0.1,"专辑、岛仔与原有歌词宽度一起保留");
+    assert!((h.app.current_width()-348.0).abs()<0.1,"专辑、云屿与原有歌词宽度一起保留");
     let texture=h.app.music_artwork.as_ref().unwrap().1.id();
-    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.brush.as_ref().is_some_and(|b|b.fill_texture_id==texture))),"专辑封面不能被岛仔替代");
+    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r) if r.brush.as_ref().is_some_and(|b|b.fill_texture_id==texture))),"专辑封面不能被云屿替代");
     let text=h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()=="晚风吹过了山岗"=>Some(t),_=>None}).unwrap();
     assert_eq!(text.galley.rows.len(),1,"保留单行歌词");
     let cover=h.shapes.iter().find_map(|s|match &s.shape{
         egui::Shape::Rect(r) if r.brush.as_ref().is_some_and(|b|b.fill_texture_id==texture)=>Some(r.rect),
         _=>None
-    }).expect("专辑封面不能被岛仔替代");
+    }).expect("专辑封面不能被云屿替代");
     let eyes:Vec<_>=h.shapes.iter().filter_map(|s|match &s.shape{
         egui::Shape::Path(p) if p.points.len()==13 && (2.79..=3.61).contains(&p.stroke.width)=>Some(p),
         _=>None
@@ -4344,7 +4344,7 @@ fn mascot_and_album_share_the_single_line_lyric_island(){
     let eye_right=eyes.iter().flat_map(|p|p.points.iter().map(|pt|pt.x)).fold(f32::NEG_INFINITY,f32::max);
     assert!(eye_right<cover.left()-1.0,"吉祥物在封面左侧独立槽，不叠在封面或歌词上");
     let lyric_rect=text.visual_bounding_rect();
-    assert!(lyric_rect.left()>=cover.right()-2.0,"歌词在封面和岛仔右侧");
+    assert!(lyric_rect.left()>=cover.right()-2.0,"歌词在封面和云屿右侧");
 }
 
 #[test]
@@ -4492,7 +4492,7 @@ fn mascot_feedback_plays_beside_notice_and_respects_switches(){
     for _ in 0..60 {h.frame(vec![]);}assert_eq!(h.app.pet_state(),PetState::Satisfied);
     assert!(h.app.notice.is_some());
     let atlas=h.ctx.tex_manager().read().allocated().find_map(|(id,meta)|(meta.name=="daozai-expressions").then_some(*id)).expect("表情图集已加载");
-    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Mesh(mesh) if mesh.texture_id==atlas)),"通知期间岛仔仍应可见");
+    assert!(h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Mesh(mesh) if mesh.texture_id==atlas)),"通知期间云屿仍应可见");
     for _ in 0..240 {h.frame(vec![]);}assert_eq!(h.app.pet_state(),PetState::Awake);
     h.app.notice=None;for _ in 0..240 {h.frame(vec![]);}assert_eq!(h.app.pet_state(),PetState::Awake);
     h.app.drink_water();h.app.settings.minimal=true;h.frame(vec![]);assert!(h.app.pet.reaction.is_none());
@@ -4687,7 +4687,7 @@ fn windows_notification_echo_does_not_duplicate_own_reminders(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=H::new();h.frame(vec![]);
     h.app.alert("喝水时间到了","喝点水吧",2,true);
     h.app.settings.read_notifications=true;h.app.receive_notification("Windows 通知".into(),"test".into(),"喝水时间到了 · 喝点水吧".into());assert_eq!(h.app.history.len(),1);
-    assert_eq!(h.app.alerts.len(),1,"岛仔发出的系统通知不能再次进入岛内通知队列");
+    assert_eq!(h.app.alerts.len(),1,"云屿发出的系统通知不能再次进入岛内通知队列");
     h.app.notification_apps.items.push(("mail".into(),"邮件".into(),true));h.app.receive_notification("邮件".into(),"mail".into(),"收到一封新邮件".into());assert_eq!(h.app.alerts.len(),2);assert!(h.app.notification_bell_until>h.app.t);
 }
 
@@ -7631,7 +7631,7 @@ fn skin_gallery_pages(){
         for page in 0..crate::app::PAGE_NAMES.len() {
             let mut h=H::new();h.app.settings.skin=skin;h.app.settings.island_shape=crate::model::IslandShape::Pill;
             h.quota_accounts(2);
-            h.app.todos.items.push(crate::model::TodoItem{text:"整理岛仔皮肤反馈".into(),done_on:None,due:Some("2026-11-05 10:00".into()),reminded:false,..Default::default()});
+            h.app.todos.items.push(crate::model::TodoItem{text:"整理云屿皮肤反馈".into(),done_on:None,due:Some("2026-11-05 10:00".into()),reminded:false,..Default::default()});
             h.app.todos.items.push(crate::model::TodoItem{text:"已完成的事项".into(),done_on:Some("2026-11-04".into()),due:None,reminded:false,..Default::default()});
             h.media=crate::smtc::NowPlaying{title:"Paper Boats".into(),artist:"The Lanterns".into(),position:64.0,duration:201.0,playing:true,..Default::default()};
             let (w,hgt)=((crate::app::CANVAS_W*2.0) as usize,(WIN_H*2.0) as usize);
@@ -7849,11 +7849,11 @@ fn feature_gallery(){
     let mut h=H::new();let mut r=feature_raster();h.app.show_page(3);h.app.shelf_tab=1;
     shoot_feature(&mut h,&mut r,&dest,"clip-empty",60,Some(H::local(120.0,60.0)),today);
     {let mut hist=h.app.clipboard.lock();hist.items.clear();
-        for (i,t) in ["https://github.com/cczdnb/NimbusIsle/releases","会议纪要：\n1. 周三前确认岛仔竖版方案\n2. 剪贴板记录上线","13800138000","SELECT * FROM todo WHERE repeat > 0 ORDER BY due;","验证码 482913"].iter().enumerate(){hist.push(t,&format!("09:{:02}",30+i));}
+        for (i,t) in ["https://github.com/cczdnb/NimbusIsle/releases","会议纪要：\n1. 周三前确认云屿竖版方案\n2. 剪贴板记录上线","13800138000","SELECT * FROM todo WHERE repeat > 0 ORDER BY due;","验证码 482913"].iter().enumerate(){hist.push(t,&format!("09:{:02}",30+i));}
         hist.items[3].pinned=true;}
     shoot_feature(&mut h,&mut r,&dest,"clip-list",30,Some(H::local(200.0,66.0)),today);
     h.app.shelf_tab=0;
-    let file=std::env::temp_dir().join("岛仔周报.docx");std::fs::write(&file,b"x").unwrap();h.app.shelf.items=vec![file];
+    let file=std::env::temp_dir().join("云屿周报.docx");std::fs::write(&file,b"x").unwrap();h.app.shelf.items=vec![file];
     shoot_feature(&mut h,&mut r,&dest,"shelf-files",30,Some(H::local(120.0,60.0)),today);
     h.app.confirm_clear=Some(h.app.t);
     shoot_feature(&mut h,&mut r,&dest,"shelf-confirm",5,Some(H::local(120.0,60.0)),today);

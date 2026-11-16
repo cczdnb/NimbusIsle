@@ -1,5 +1,5 @@
 //! 第三方待办：把 Jira / Linear / GitHub / Notion / 飞书 / Windows 待办 / 自建 JSON
-//! 同步进岛仔现有待办页，与本地待办并存。令牌只进 Windows 凭据管理器。
+//! 同步进云屿现有待办页，与本地待办并存。令牌只进 Windows 凭据管理器。
 
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{self, Receiver};

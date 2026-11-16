@@ -11,13 +11,13 @@ fn compatible(mut options:eframe::NativeOptions,backends:eframe::wgpu::Backends)
         setup.instance_descriptor.backends=backends;
         setup.power_preference=eframe::wgpu::PowerPreference::LowPower;
         // 默认的 Performance 让 DX12 分配器按 256MB 显存块 + 64MB 上传块预留。核显没有独立显存，
-        // 这些都算进岛仔进程内存（实测 60MB → 530MB）。岛仔的纹理只有几 MB，按小块分配即可。
+        // 这些都算进云屿进程内存（实测 60MB → 530MB）。云屿的纹理只有几 MB，按小块分配即可。
         let base=setup.device_descriptor.clone();
         setup.device_descriptor=std::sync::Arc::new(move|adapter|small_memory_blocks(base(adapter)));
     }
     options
 }
-/// 岛仔同时存在的纹理只有几十张。DX12 会按绑定上限预建整张描述符表：
+/// 云屿同时存在的纹理只有几十张。DX12 会按绑定上限预建整张描述符表：
 /// 默认 100 万项约 61MB，65536 项约 4MB，仍有上千倍余量。
 const MAX_BINDINGS:u32=65_536;
 fn small_memory_blocks(descriptor:eframe::wgpu::DeviceDescriptor<'static>)->eframe::wgpu::DeviceDescriptor<'static>{

@@ -1,4 +1,4 @@
-# 使用独立目录和最小测试程序验证更新，不启动或替换日常使用的岛仔。
+# 使用独立目录和最小测试程序验证更新，不启动或替换日常使用的云屿。
 param([switch]$EncryptedCache)
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
@@ -32,7 +32,7 @@ try {
         $archive = Join-Path $work 'update.zip'
         $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
         $version = if ($case -eq 'wrong-version') {'9.8.8'} else {'9.8.7'}
-        $entry = if ($case -eq 'traversal') {'../daozai.exe'} else {"Daozai-v$version-windows-x64/daozai.exe"}
+        $entry = if ($case -eq 'traversal') {'../daozai.exe'} else {"Yunyu-v$version-windows-x64/daozai.exe"}
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $fixture, $entry) | Out-Null
         $zip.Dispose()
         Set-Content -LiteralPath (Join-Path $work 'version.txt') -Value $version

@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$OutputDirectory = [Environment]::GetFolderPath('Desktop'),
     [string]$DataDirectory = $(if ($env:DAOZAI_DATA_DIR) { $env:DAOZAI_DATA_DIR } else { Join-Path $env:APPDATA 'Daozai' }),
     [switch]$RevealArchive
@@ -154,12 +154,12 @@ public static class DaozaiDiagnosticWindows {
     } catch { $info.MusicPlayerQuery = '无法读取音乐播放器进程' }
     Save-Text 'environment.json' ($info | ConvertTo-Json -Depth 7)
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-    $archive = Join-Path $OutputDirectory ('岛仔诊断-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.zip')
+    $archive = Join-Path $OutputDirectory ('云屿诊断-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.zip')
     Compress-Archive -Path (Join-Path $collectionRoot '*') -DestinationPath $archive
     Write-Output ('诊断包已保存：' + $archive)
-    Write-Output '请将诊断包发给开发者，并说明异常出现时间、重启岛仔能否恢复、是否发生在睡眠唤醒后。'
+    Write-Output '请将诊断包发给开发者，并说明异常出现时间、重启云屿能否恢复、是否发生在睡眠唤醒后。'
     Write-Output '音乐没有歌名、封面或歌词时，请在歌曲播放中运行诊断，并说明使用的播放模式（歌单、电台、FM、漫游等）。'
-    Write-Output '诊断包含岛仔日志、功能开关、系统与显卡信息、消息窗口类型和播放器状态。音乐日志可能含有歌名和歌手。诊断包由你决定是否分享。'
+    Write-Output '诊断包含云屿日志、功能开关、系统与显卡信息、消息窗口类型和播放器状态。音乐日志可能含有歌名和歌手。诊断包由你决定是否分享。'
     if ($RevealArchive) {
         Read-Host '按回车键查看诊断包' | Out-Null
         Start-Process -FilePath (Join-Path $env:WINDIR 'explorer.exe') -ArgumentList ('/select,"' + $archive + '"')

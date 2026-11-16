@@ -36,7 +36,7 @@ body:
     id: expectation
     attributes:
       label: 希望的效果
-      description: 希望岛仔怎么做？有截图或参考图更好。
+      description: 希望云屿怎么做？有截图或参考图更好。
     validations:
       required: true
 
