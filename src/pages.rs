@@ -117,6 +117,9 @@ impl App {
             c.fill(44.0,13.0,62.0,62.0,13.0,Color32::from_rgb(25,25,27));
             paint::note(c,75.0,44.0,26.0,Color32::from_rgb(110,110,114));
         }
+        if has && c.hit(44.0,art_y,art_size,art_size,"m-cover").double_clicked() {
+            self.open_player();
+        }
 
         if !has {
             c.text(121.0,47.0,"暂无音乐",14.0,W::Bold,theme::WHITE,H::Left);
@@ -231,6 +234,7 @@ impl App {
                 self.settings.save();
             }
         }
+        if with_lyrics {self.draw_music_lyrics(c);}
     }
 
     fn change_music_volume(&mut self,command:Transport,cmds:&mut Vec<Cmd>){
@@ -285,44 +289,9 @@ impl App {
     }
 
 
-    fn draw_compact_music(&mut self,c:&Card,np:&crate::smtc::NowPlaying,cmds:&mut Vec<Cmd>) {
-        let secs=self.lyric_position();
-        let lyrics=self.ly.lyrics.as_ref();
-        let index=lyrics.filter(|l|l.synced).and_then(|l|l.index_at(secs));
-        let line=index.and_then(|i|lyrics.and_then(|l|l.lines.get(i)));
-        let enh=index.and_then(|i|lyrics.and_then(|l|l.enhance.for_line(i)));
-        let text=if let Some(line)=line {line.text.as_str()} else if lyrics.is_some() && !np.title.is_empty() { "前奏" } else { np.title.as_str() };
-        let trans=enh.map(|e|e.translation.as_str()).unwrap_or("");
-        let words=enh.map(|e|e.words.as_slice()).unwrap_or(&[]);
-        let next_t=index.and_then(|i|lyrics.and_then(|l|l.lines.get(i+1).map(|n|n.t)));
-        let line_t=line.map(|l|l.t).unwrap_or(0.0);
-        let progress=if line.is_some(){crate::lyric_enhance::scan_progress(line_t,next_t,words,secs)}else{0.0};
-        c.text(99.0,22.0,&c.fit(&np.artist,8.5,W::Regular,150.0),8.5,W::Regular,theme::GRAY,H::Left);
-        let dim=Color32::from_gray(145);
-        crate::lyric_enhance::paint_scanned(&c.painter,c.pos(99.0,32.0),&c.fit(text,13.0,W::Semibold,200.0),c.font(13.0,W::Semibold),dim,theme::WHITE,progress,200.0*c.s,2);
-        if !trans.is_empty() {
-            c.text(99.0,54.0,&c.fit(trans,9.0,W::Regular,200.0),9.0,W::Regular,Color32::from_gray(165),H::Left);
-        } else if line.is_none() {
-            c.text(99.0,52.0,&c.fit(&np.title,10.0,W::Regular,200.0),10.0,W::Regular,theme::GRAY,H::Left);
-        }
-        let ic=theme::WHITE;
-        let playing_t=c.ui.ctx().animate_bool_with_time(egui::Id::new("np-playing-compact"),np.playing,0.22);
-        let btn=|x:f32,id:&str| {
-            let r=c.hit(x-12.0,38.0,24.0,24.0,id);
-            let (h,p)=c.hover_t(&r);
-            if h>0.01 {c.faded(h).circle(x,50.0,11.0,Color32::from_white_alpha(20));}
-            (r,c.scaled(x,50.0,1.0-0.1*p))
-        };
-        let (previous,pc)=btn(318.0,"m-prev-c");
-        paint::skip(&pc,318.0,50.0,-1.0,ic);
-        let (play,plc)=btn(348.0,"m-play-c");
-        paint::play_pause(&plc,348.0,50.0,14.0,playing_t,ic);
-        let (next,nc)=btn(378.0,"m-next-c");
-        paint::skip(&nc,378.0,50.0,1.0,ic);
-        if previous.clicked(){cmds.push(Cmd::Media(crate::smtc::Transport::Prev));}
-        if play.clicked(){cmds.push(Cmd::Media(crate::smtc::Transport::Toggle));}
-        if next.clicked(){cmds.push(Cmd::Media(crate::smtc::Transport::Next));}
-        let _ = (text,);
+    fn draw_compact_music(&mut self,c:&Card,np:&crate::smtc::NowPlaying,_cmds:&mut Vec<Cmd>) {
+        c.text(99.0,36.0,&c.fit(&np.title,12.0,W::Semibold,124.0),12.0,W::Semibold,theme::WHITE,H::Left);
+        if !np.artist.is_empty(){c.text(99.0,54.0,&c.fit(&np.artist,10.0,W::Regular,124.0),10.0,W::Regular,theme::GRAY,H::Left);}
     }
 
     fn draw_music_lyrics(&mut self,c:&Card) {

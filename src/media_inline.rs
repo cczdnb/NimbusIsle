@@ -54,13 +54,15 @@ pub fn measure_clock(ctx: &Context, text: &str, size: f32) -> f32 {
     }
 }
 
-/// 媒体行高度：为第二行文字和独立进度条留出空间，避免歌手被裁到胶囊底边。
-pub fn row_height(font: f32, second_line: bool, progress: bool) -> f32 {
+/// 媒体行高度：为第二行原文、译文和独立进度条留出空间。
+pub fn row_height(font: f32, second_line: bool, progress: bool, original_second: bool) -> f32 {
     let top = 4.0;
     let main = font + 4.0;
-    let second = if second_line { font * TRANS_SCALE + 4.0 } else { 0.0 };
+    let second = if original_second { font + 4.0 } else { 0.0 }
+        + if second_line { font * TRANS_SCALE + 2.0 } else { 0.0 };
     let prog = if progress { 8.0 } else { 3.0 };
-    (top + main + second + prog).clamp(30.0, 56.0)
+    let cap = if original_second { 72.0 } else { 56.0 };
+    (top + main + second + prog).clamp(30.0, cap)
 }
 
 pub fn measure_block_width(
@@ -73,14 +75,16 @@ pub fn measure_block_width(
     spectrum: bool,
 ) -> f32 {
     let lyric_size = font;
+    // 歌词和译文的测量宽度封顶，长句只在槽内滚动，不能把岛宽撑开。
+    let cap = 220.0;
     let mut text_w = if let Some(line) = lyric.filter(|s| !s.is_empty()) {
-        measure_text(ctx, line, lyric_size, W::Semibold)
+        measure_text(ctx, line, lyric_size, W::Semibold).min(cap)
     } else {
         measure_text(ctx, title, TITLE_SIZE.max(font * 0.95), W::Semibold)
             .max(measure_text(ctx, artist, ARTIST_SIZE, W::Regular))
     };
     if !trans.is_empty() {
-        text_w = text_w.max(measure_text(ctx, trans, lyric_size * TRANS_SCALE, W::Regular));
+        text_w = text_w.max(measure_text(ctx, trans, lyric_size * TRANS_SCALE, W::Regular).min(cap));
     }
     let tail = if spectrum { TEXT_TAIL } else { 16.0 };
     THUMB_MEASURE + text_w + tail
@@ -174,13 +178,21 @@ pub struct InlinePaint<'a> {
     pub playing: bool,
     pub artwork: Option<([usize; 2], egui::TextureId)>,
     pub time: f64,
+    /// 当前句出现后经过的秒数。换句时归零，长句横滑从头开始。
+    /// 当前句出现后经过的秒数。换句时归零，长句横滑从头开始。
+    pub line_age: f32,
+    /// 原文行数。1 为单行横滑；2 先换到第二行，仍超出槽宽的再横滑。
+    pub rows: usize,
 }
 
+#[derive(PartialEq)]
 pub enum InlineAction {
     Prev,
     Toggle,
     Next,
     Seek(f64),
+    /// 双击封面：回到播放器。单击封面不产生这个动作，也不跳进度。
+    Activate,
 }
 
 fn mmss(secs: f64) -> String {
@@ -284,25 +296,25 @@ pub fn paint_inline(
     let mut x = content_left;
     let center_y = height / 2.0;
 
+    let thumb_x = x;
+    let thumb_y = (height - THUMB) / 2.0;
     if let Some(([iw, ih], id)) = data.artwork {
-        let thumb_y = (height - THUMB) / 2.0;
         let uv_size = if iw > ih {
             egui::vec2(ih as f32 / iw as f32, 1.0)
         } else {
             egui::vec2(1.0, iw as f32 / ih as f32)
         };
         let uv = Rect::from_center_size(Pos2::new(0.5, 0.5), uv_size);
-        let r = c.rect(x, thumb_y, THUMB, THUMB);
+        let r = c.rect(thumb_x, thumb_y, THUMB, THUMB);
         c.painter.add(
             egui::epaint::RectShape::filled(r, 5.0 * c.s, Color32::WHITE).with_texture(id, uv),
         );
-        x += THUMB + 8.0;
     } else {
-        let thumb_y = (height - THUMB) / 2.0;
-        c.fill(x, thumb_y, THUMB, THUMB, 5.0, theme::CARD);
-        paint::note(c, x + THUMB / 2.0, center_y, 12.0, theme::WHITE);
-        x += THUMB + 8.0;
+        c.fill(thumb_x, thumb_y, THUMB, THUMB, 5.0, theme::CARD);
+        paint::note(c, thumb_x + THUMB / 2.0, center_y, 12.0, theme::WHITE);
     }
+    let cover = c.hit(thumb_x, thumb_y, THUMB, THUMB, "inline-cover");
+    x += THUMB + 8.0;
 
     let right_reserve = if hovered {
         BUTTON_BLOCK_LEFT
@@ -325,7 +337,8 @@ pub fn paint_inline(
     if let Some(line) = has_lyric {
         let has_trans = !data.trans.is_empty();
         let trans_h = if has_trans { lyric_size * TRANS_SCALE + 2.0 } else { 0.0 };
-        let block = lyric_size + trans_h;
+        let rows = data.rows.max(1) as f32;
+        let block = lyric_size * rows + trans_h;
         let top = ((text_h_area - block) * 0.5).max(1.0);
         let text_y = top;
         lyric_enhance::paint_lyric_line(
@@ -340,8 +353,9 @@ pub fn paint_inline(
             data.fade,
             data.anim,
             text_max_w * clipped.s,
-            1,
+            data.rows.max(1),
             data.align,
+            data.line_age,
         );
         if has_trans {
             // 与歌词一样在槽内裁剪，不把译文改写成省略号（宽度已由岛体固定）。
@@ -376,7 +390,7 @@ pub fn paint_inline(
         }
     }
 
-    let mut action = None;
+    let mut action = if cover.double_clicked() { Some(InlineAction::Activate) } else { None };
     if data.show_progress {
         if let Some(progress) = data.timeline {
             let prog_y = height - 4.5;
@@ -420,7 +434,7 @@ pub fn paint_inline(
                         );
                     }
                 }
-                if (bar.clicked() || bar.drag_stopped()) && data.duration > 0.1 {
+                if action.is_none() && (bar.clicked() || bar.drag_stopped()) && data.duration > 0.1 {
                     if let Some(secs) = preview {
                         action = Some(InlineAction::Seek(secs));
                     }
@@ -460,13 +474,13 @@ pub fn paint_inline(
         );
         let next = c.hit(cx_next - r, cy - r, r * 2.0, r * 2.0, "inline-next");
         paint::skip(c, cx_next, cy, 1.0, theme::WHITE);
-        if prev.clicked() {
+        if action.is_none() && prev.clicked() {
             action = Some(InlineAction::Prev);
         }
-        if play.clicked() {
+        if action.is_none() && play.clicked() {
             action = Some(InlineAction::Toggle);
         }
-        if next.clicked() {
+        if action.is_none() && next.clicked() {
             action = Some(InlineAction::Next);
         }
     } else if let Some(style) = data.spectrum {
@@ -482,10 +496,13 @@ mod tests {
 
     #[test]
     fn row_height_grows_for_second_line_and_progress() {
-        let base = row_height(12.0, false, false);
+        let base = row_height(12.0, false, false, false);
         assert!((base - 30.0).abs() < 0.1);
-        let with = row_height(12.0, true, true);
+        let with = row_height(12.0, true, true, false);
         assert!(with > base + 6.0);
         assert!(with <= 56.0);
+        let two = row_height(12.0, false, false, true);
+        assert!(two > base + 8.0);
+        assert!(two <= 72.0);
     }
 }

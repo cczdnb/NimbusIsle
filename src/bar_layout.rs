@@ -15,13 +15,17 @@ pub(crate) const BELL: usize = 8;
 pub(crate) const PET: usize = 9;
 /// 第三方待办提醒：超时未确认后出现在常驻栏。额度溢出槽从 CORE_SLOTS 起算，避免与本槽冲突。
 pub(crate) const REMOTE_TODO: usize = 10;
-const CORE_SLOTS: usize = 11;
+/// 常驻 CPU、内存。待办仍是 10，额度溢出从 13 起。
+pub(crate) const CPU: usize = 11;
+pub(crate) const MEM: usize = 12;
+const CORE_SLOTS: usize = 13;
 /// 天气徽标的基础槽宽；温度文字更长时由 `widen` 补足。
 pub(crate) const WEATHER_WIDTH: f32 = 38.0;
 pub(crate) const REMOTE_TODO_WIDTH: f32 = 22.0;
-const WIDTHS: [f32; 11] = [44.0,20.0,27.0,27.0,27.0,WEATHER_WIDTH,14.0,crate::focus_bar::WIDTH,20.0,32.0,REMOTE_TODO_WIDTH];
+pub(crate) const METER_WIDTH: f32 = 58.0;
+const WIDTHS: [f32; 13] = [44.0,20.0,27.0,27.0,27.0,WEATHER_WIDTH,14.0,crate::focus_bar::WIDTH,20.0,32.0,REMOTE_TODO_WIDTH,METER_WIDTH,METER_WIDTH];
 
-pub(crate) const DEFAULT_ORDER: [usize;8]=[BATTERY,PET,CLOCK,WEATHER,QUOTA,MUSIC,FOCUS,REMOTE_TODO];
+pub(crate) const DEFAULT_ORDER: [usize;10]=[BATTERY,PET,CLOCK,WEATHER,QUOTA,MUSIC,FOCUS,REMOTE_TODO,CPU,MEM];
 pub(crate) fn valid_order(order:&[usize])->bool {
     order.len()==DEFAULT_ORDER.len() && DEFAULT_ORDER.iter().all(|slot|order.iter().filter(|value|*value==slot).count()==1)
 }
@@ -48,7 +52,7 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
-    pub fn new(battery:bool,quotas:usize,music:bool,focus:bool,bell:bool,pet:bool,weather:bool,todo_nudge:bool)->Self {
+    pub fn new(battery:bool,quotas:usize,music:bool,focus:bool,bell:bool,pet:bool,weather:bool,todo_nudge:bool,cpu:bool,mem:bool)->Self {
         fn place(cursor:&mut f32,width:f32)->f32 {let x=*cursor+width/2.0;*cursor+=width+12.0;x}
         let mut widths=WIDTHS.to_vec(); widths.resize(CORE_SLOTS+quotas.saturating_sub(3),27.0);
         let mut x=vec![None;widths.len()];let mut cursor=16.0;
@@ -74,6 +78,8 @@ impl Layout {
             if on {x[slot]=Some(place(&mut cursor,WIDTHS[slot]));}
         }
         if todo_nudge {x[REMOTE_TODO]=Some(place(&mut cursor,WIDTHS[REMOTE_TODO]));}
+        if cpu {x[CPU]=Some(place(&mut cursor,WIDTHS[CPU]));}
+        if mem {x[MEM]=Some(place(&mut cursor,WIDTHS[MEM]));}
         let width=cursor-12.0+16.0;
         for value in x.iter_mut().flatten() {*value-=width/2.0;}
         Self {width:width.max(96.0),x,widths,quotas}
@@ -127,7 +133,7 @@ pub(crate) struct Motion {
     initialized: bool,
 }
 impl Default for Motion {
-    fn default()->Self {Self {target:Layout::new(false,0,false,false,false,false,false,false),positions:vec![Spring::new(0.0,360.0,0.76);11],initialized:false}}
+    fn default()->Self {Self {target:Layout::new(false,0,false,false,false,false,false,false,false,false),positions:vec![Spring::new(0.0,360.0,0.76);13],initialized:false}}
 }
 impl Motion {
     pub fn step(&mut self,target:Layout,dt:f32,animate:bool) {
@@ -156,7 +162,7 @@ mod tests {
     fn hidden_clock_closes_its_gap_in_custom_orders(){
         for reverse in [false,true] {for count in [0,5] {
             let mut order=DEFAULT_ORDER.to_vec();if reverse {order.reverse();}
-            let mut layout=Layout::new(true,count,true,true,false,true,true,false);
+            let mut layout=Layout::new(true,count,true,true,false,true,true,false,false,false);
             layout.reorder(&order);layout.widen_clock(64.0);
             let width=layout.width;let removed=layout.widths[CLOCK]+12.0;
             layout.hide_clock();assert!(layout.x[CLOCK].is_none());
@@ -166,15 +172,15 @@ mod tests {
             assert!(boxes.windows(2).all(|p|p[1].0-p[0].1>=6.9),"关闭时间后相邻组件不应重叠");
             let after=layout.x.clone();layout.hide_clock();assert_eq!(layout.x,after);
         }}
-        let mut empty=Layout::new(false,0,false,false,false,false,false,false);
+        let mut empty=Layout::new(false,0,false,false,false,false,false,false,false,false);
         empty.hide_clock();assert_eq!(empty.width,96.0);assert!(empty.x.iter().all(Option::is_none));
     }
     #[test]
     fn weather_can_be_reordered_independently_of_the_clock(){
-        let order=[WEATHER,FOCUS,MUSIC,QUOTA,CLOCK,PET,BATTERY,REMOTE_TODO];
+        let order=[WEATHER,FOCUS,MUSIC,QUOTA,CLOCK,PET,BATTERY,REMOTE_TODO,CPU,MEM];
         assert!(valid_order(&order),"天气应有独立的排列位置");
         for quotas in 0..=5 {for enabled in [false,true] {
-            let mut layout=Layout::new(true,quotas,true,true,false,true,enabled,false);
+            let mut layout=Layout::new(true,quotas,true,true,false,true,enabled,false,false,false);
             layout.reorder(&order);layout.widen(WEATHER,18.0);layout.widen_clock(40.0);
             let positions:Vec<_>=order.iter().filter_map(|slot|layout.x[*slot]).collect();
             assert!(positions.windows(2).all(|pair|pair[0]<pair[1]));
@@ -183,8 +189,8 @@ mod tests {
         }}
     }
     #[test] fn deepseek_balance_follows_more_and_never_overlaps(){
-        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO]] {for quotas in 1..=6 {for battery in [false,true]{
-            let mut layout=Layout::new(battery,quotas,true,true,false,true,false,false);layout.reorder(&order);layout.balance_tail(quotas-1,76.0);layout.widen_clock(40.0);
+        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,CPU,MEM]] {for quotas in 1..=6 {for battery in [false,true]{
+            let mut layout=Layout::new(battery,quotas,true,true,false,true,false,false,false,false);layout.reorder(&order);layout.balance_tail(quotas-1,76.0);layout.widen_clock(40.0);
             let mut boxes:Vec<_>=layout.x.iter().enumerate().filter_map(|(i,x)|x.map(|x|{let width=layout.widths[i];(x-width/2.0,x+width/2.0)})).collect();boxes.sort_by(|a,b|a.0.total_cmp(&b.0));
             assert!(boxes.windows(2).all(|p|p[1].0-p[0].1>=6.9));assert!(boxes.last().unwrap().1<=layout.width/2.0-15.9);
             assert!(layout.width<crate::app::WIN_W);
@@ -192,9 +198,9 @@ mod tests {
     }
     #[test]
     fn clock_12h_keeps_components_separate_in_custom_orders(){
-        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO]] {
+        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,CPU,MEM]] {
             for quotas in 0..=5 {
-                let mut layout=Layout::new(true,quotas,true,true,false,true,false,false);
+                let mut layout=Layout::new(true,quotas,true,true,false,true,false,false,false,false);
                 layout.reorder(&order);layout.widen_clock(40.0);
                 let mut boxes:Vec<_>=layout.x.iter().enumerate().filter_map(|(i,x)|x.map(|x|{
                     let width=layout.widths[i];
@@ -211,9 +217,9 @@ mod tests {
     fn custom_order_preserves_groups_and_hidden_positions(){
         assert!(!valid_order(&[0,0,2,6,7,9]));
         assert!(!valid_order(&[0,1,2]));
-        let order=[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO];
+        let order=[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,CPU,MEM];
         for battery in [false,true]{for count in 0..=5 {
-            let mut layout=Layout::new(battery,count,true,true,false,true,false,false);
+            let mut layout=Layout::new(battery,count,true,true,false,true,false,false,false,false);
             let width=layout.width;layout.reorder(&order);
             assert_eq!(layout.width,width);
             let positions:Vec<_>=order.iter().filter_map(|i|layout.x[*i]).collect();
@@ -227,7 +233,7 @@ mod tests {
     #[test]
     fn every_component_combination_fits_without_overlaps(){
         for quotas in 0..=8 {for battery in [false,true] {for music in [false,true] {for focus in [false,true] {for bell in [false,true] {for pet in [false,true] {for weather in [false,true] {for todo in [false,true] {
-            let layout=Layout::new(battery,quotas,music,focus,bell,pet,weather,todo);
+            let layout=Layout::new(battery,quotas,music,focus,bell,pet,weather,todo,false,false);
             let mut boxes:Vec<_>=layout.x.iter().enumerate().filter_map(|(i,x)|x.map(|x|(x-layout.widths[i]/2.0,x+layout.widths[i]/2.0))).collect();
             boxes.sort_by(|a,b|a.0.total_cmp(&b.0));
             assert_eq!(layout.quota_slots().count(),quotas);
@@ -239,9 +245,9 @@ mod tests {
     }
     #[test]
     fn weather_defaults_after_the_clock_and_preserves_custom_spacing(){
-        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO],[QUOTA,MUSIC,CLOCK,WEATHER,PET,FOCUS,BATTERY,REMOTE_TODO]] {
+        for order in [DEFAULT_ORDER,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,CPU,MEM],[QUOTA,MUSIC,CLOCK,WEATHER,PET,FOCUS,BATTERY,REMOTE_TODO,CPU,MEM]] {
             for quotas in 0..=3 {for battery in [false,true] {
-                let mut layout=Layout::new(battery,quotas,true,true,false,true,true,false);
+                let mut layout=Layout::new(battery,quotas,true,true,false,true,true,false,false,false);
                 layout.reorder(&order);
                 let (clock,weather)=match (layout.x[CLOCK],layout.x[WEATHER]) {(Some(c),Some(w))=>(c,w),_=>panic!("时钟与天气都应就位：{layout:?}")};
                 assert!(weather>clock+22.0+6.9,"天气应紧跟时钟右侧：时钟 {clock}，天气 {weather}");
@@ -257,7 +263,7 @@ mod tests {
     }
     #[test]
     fn weather_chip_widens_symmetrically_without_overlaps(){
-        let mut layout=Layout::new(true,3,true,true,false,true,true,false);
+        let mut layout=Layout::new(true,3,true,true,false,true,true,false,false,false);
         let before=layout.x.clone();
         layout.widen(WEATHER,18.0);
         assert!((layout.widths[WEATHER]-56.0).abs()<0.01);
@@ -272,13 +278,13 @@ mod tests {
         boxes.sort_by(|a,b|a.0.total_cmp(&b.0));
         assert!(boxes.windows(2).all(|p|p[1].0-p[0].1>=6.9));
         // 未就位的槽位调用 widen 应是空操作。
-        let mut empty=Layout::new(true,0,true,true,false,true,false,false);
+        let mut empty=Layout::new(true,0,true,true,false,true,false,false,false,false);
         let width=empty.width;empty.widen(WEATHER,20.0);
         assert_eq!(empty.width,width);
     }
     #[test]
     fn replacing_battery_moves_continuously_and_supports_an_instant_state(){
-        let before=Layout::new(true,1,true,false,false,true,false,false);let after=Layout::new(false,1,true,false,false,true,false,false);
+        let before=Layout::new(true,1,true,false,false,true,false,false,false,false);let after=Layout::new(false,1,true,false,false,true,false,false,false,false);
         let mut motion=Motion::default();motion.step(before.clone(),0.0,true);
         motion.step(after.clone(),1.0/60.0,true);let mid=motion.current().x[QUOTA].unwrap();
         assert!(mid<before.x[QUOTA].unwrap()&&mid>after.x[QUOTA].unwrap());
@@ -290,7 +296,7 @@ mod tests {
     #[test]
     fn todo_nudge_slot_does_not_collide_with_quota_overflow(){
         for quotas in 0..=8 {
-            let mut layout=Layout::new(true,quotas,true,true,false,true,true,true);
+            let mut layout=Layout::new(true,quotas,true,true,false,true,true,true,false,false);
             layout.reorder(&DEFAULT_ORDER);
             assert!(layout.x[REMOTE_TODO].is_some(),"待办图标应就位：{layout:?}");
             assert_eq!(layout.quota_slots().count(),quotas);
@@ -300,7 +306,9 @@ mod tests {
             if quotas>3 {
                 let overflow=quota_slot(3);
                 assert_ne!(overflow,REMOTE_TODO,"溢出额度槽不能占用待办槽");
-                assert!(overflow>REMOTE_TODO);
+                assert_ne!(overflow,CPU,"溢出额度槽不能占用 CPU");
+                assert_ne!(overflow,MEM,"溢出额度槽不能占用内存");
+                assert!(overflow>MEM);
             }
         }
     }

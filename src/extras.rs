@@ -370,8 +370,9 @@ impl App {
         let pending=self.pending_messengers.iter().any(|old|old.source==client && old.pid==unread.pid);
         self.mark_messenger(client,unread.pid,unread.window);
         if pending{return;}
-        self.notification_bell_at=self.t;self.notification_bell_until=self.t+4.5;
-        self.enqueue_alert(Alert{source:AlertSource::Messenger(client),title:client.name().into(),body:format!("有新消息 · 请到{}查看",client.name()),page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread:Some(unread)},false);
+        let dwell=self.settings.notification_dwell();
+        self.notification_bell_at=self.t;self.notification_bell_until=self.t+dwell;
+        self.enqueue_alert(Alert{source:AlertSource::Messenger(client),title:client.name().into(),body:format!("有新消息 · 请到{}查看",client.name()),page:usize::MAX,at:self.t,duration:dwell,bluetooth:None,meeting:None,unread:Some(unread)},false);
     }
     pub fn set_messenger_status(&mut self,client:crate::app::Messenger,status:String){self.messenger_statuses.insert(client,status);}
     pub fn messenger_status(&self,client:crate::app::Messenger)->&str{self.messenger_statuses.get(&client).map(String::as_str).unwrap_or("")}
@@ -388,22 +389,24 @@ impl App {
         if !self.notification_apps.observe(&id,&app) || !self.settings.notifications{return;}
         let unread=client.map(|client|unread.filter(|u|u.source==client && u.pid!=0).unwrap_or(crate::app::Unread::of(client)));
         if let Some(unread)=unread{self.mark_messenger(unread.source,unread.pid,unread.window);}
+        let dwell=self.settings.notification_dwell();
         self.notification_bell_at=self.t;
-        self.notification_bell_until=self.t+4.5;
+        self.notification_bell_until=self.t+dwell;
         let title=app.chars().filter(|c|!c.is_control()).take(80).collect();
         let body=if self.settings.notification_preview {
             let mut text=body.chars().filter(|c|!c.is_control()).take(300).collect::<String>();
             if let Some(code)=crate::otp::extract("",&text,&[]) {text=crate::mail_privacy::mask(&text,&code.text);}
             text
         }else{"收到新通知 · 内容已隐藏".into()};
-        self.enqueue_alert(Alert{source:AlertSource::External(id),title,body,page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread},false);
+        self.enqueue_alert(Alert{source:AlertSource::External(id),title,body,page:usize::MAX,at:self.t,duration:dwell,bluetooth:None,meeting:None,unread},false);
     }
     pub fn reveal_messenger_notice(&mut self,unread:crate::app::Unread){
         if !unread.source.adapter().dismiss_unread || !self.pending_messengers.contains(&unread){return;}
         let body=if unread.pid==0{"消息账号暂无法确认"}else{"暂时无法打开对应窗口"};
         let source=if unread.source.adapter().capture==crate::messenger::Capture::Taskbar{AlertSource::Messenger(unread.source)}else{AlertSource::External(unread.source.adapter().notification_id.into())};
-        self.notice=Some(Alert{source,title:unread.source.name().into(),body:body.into(),page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread:Some(unread)});
-        self.notification_bell_at=self.t;self.notification_bell_until=self.t+4.5;
+        let dwell=self.settings.notification_dwell();
+        self.notice=Some(Alert{source,title:unread.source.name().into(),body:body.into(),page:usize::MAX,at:self.t,duration:dwell,bluetooth:None,meeting:None,unread:Some(unread)});
+        self.notification_bell_at=self.t;self.notification_bell_until=self.t+dwell;
     }
     pub(crate) fn tick_alerts(&mut self) {
         self.pending_messengers.retain(|u|u.source.enabled(&self.settings) && (u.source.adapter().capture!=crate::messenger::Capture::SystemToast
@@ -1382,6 +1385,7 @@ impl App {
                 }
                 ui.visuals_mut().selection.bg_fill=settings_color(ctx,Color32::from_rgb(45,105,165),Color32::from_rgb(209,226,248));
                 let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气"];
+                if let Some(step)=self.wizard_step { self.settings_tab=[0,11,1,6][step as usize % 4]; }
                 ui.label(egui::RichText::new(titles[self.settings_tab.min(13)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
                 if let Some((_,start,end))=SETTINGS_GROUPS.iter().find(|(_,start,end)|(*start..=*end).contains(&self.settings_tab)) {
                     if start!=end {
@@ -1404,6 +1408,19 @@ impl App {
                 egui::ScrollArea::vertical().id_salt(("settings-scroll",self.settings_tab)).auto_shrink([false,false]).show(ui,|ui|{
                     // 右侧给滚动条留出空隙，卡片和开关不会被它压住。
                     ui.set_width((ui.available_width()-12.0).max(240.0));
+                    if let Some(step)=self.wizard_step {
+                        let names=["避让","常驻项","媒体和歌词","第三方同步"];
+                        settings_card(ui,|ui|{
+                            ui.label(egui::RichText::new(format!("首次引导 {}/4 · {}",step+1,names[step as usize])).size(13.0));
+                            ui.label("不联网，也不收集信息。地址留空，需要时再填。");
+                            ui.horizontal(|ui|{
+                                if ui.button("跳过").clicked(){self.finish_wizard();}
+                                if step<3 && ui.button("下一步").clicked(){self.wizard_step=Some(step+1);}
+                                if step==3 && ui.button("完成").clicked(){self.finish_wizard();}
+                            });
+                        });
+                        ui.add_space(6.0);
+                    }
                     // 模块已关闭：顶部说明并提供开启入口，下面的设置置灰。
                     if let Some(page)=settings_tab_module(self.settings_tab).filter(|page|!self.module_on(*page)) {
                         let mut enable=false;
@@ -1422,6 +1439,12 @@ impl App {
                     12=>self.quota_settings(ui),
                     11=>{
                         ui.label(egui::RichText::new("选择需要的页面和状态组件。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
+                        settings_label(ui,"CPU 与内存");
+                        settings_card(ui,|ui|{
+                            setting_row(ui,"CPU","收起时在常驻栏显示处理器占用，默认关闭",&mut self.settings.show_cpu);
+                            ui.separator();
+                            setting_row(ui,"内存","收起时在常驻栏显示内存占用，默认关闭",&mut self.settings.show_mem);
+                        });
                         settings_label(ui,"常驻排列");
                         settings_card(ui,|ui|self.resident_order_settings(ui));
                         settings_label(ui,"状态组件");
@@ -1540,7 +1563,7 @@ impl App {
                                     }
                                 }).response
                             });
-                            settings_hint(ui,"默认「自动」跟随时钟、额度、吉祥物等常驻内容；播放中会保持能放下封面和歌词的稳定宽度，不随句长伸缩。拉宽后作为最小宽度，常驻内容更宽时仍随内容，最长不超过屏幕；长句在歌词区内截断或扫光。改动立即生效，只影响岛体，不影响设置窗口。");
+                            settings_hint(ui,"默认「自动」跟随时钟、额度、吉祥物等常驻内容；播放中会保持能放下封面和歌词的稳定宽度，不随句长伸缩。拉宽后作为最小宽度，常驻内容更宽时仍随内容，最长不超过屏幕；长句在槽内横向滚动。改动立即生效，只影响岛体，不影响设置窗口。");
                         });
                         settings_label(ui,"岛体显示");
                         settings_card(ui,|ui|{
@@ -1632,6 +1655,10 @@ impl App {
                             self.show_lyrics=self.settings.lyrics_enabled;
                             ui.separator();
                             setting_row(ui,"岛上歌词","可选的更宽歌词区：收起时并排显示封面、歌词和控件，吉祥物仍留在左侧独立位置。关闭时播放中保持原来的顶行，媒体条加在下方。极简模式需打开本开关才会显示歌词。",&mut self.settings.island_lyrics);
+                            ui.separator();
+                            setting_row(ui,"两行歌词","收起的媒体条加高到第二行原文；译文仍单独开关。放不下的句子继续横向滚动。",&mut self.settings.lyric_multiline);
+                            ui.separator();
+                            setting_row(ui,"封面着色","只用封面的主色铺在收起的媒体条上，没有封面时不铺。",&mut self.settings.cover_tint);
                         });
                         settings_label(ui,"歌词显示时间");
                         settings_card(ui,|ui|{
@@ -1654,6 +1681,19 @@ impl App {
                             let mut size=self.settings.lyric_font_size;
                             if setting_number(ui,"字号",&mut size,10.0,18.0," 号",0.5){self.settings.lyric_font_size=size.clamp(10.0,18.0);}
                             ui.small("用于收起时的媒体条和岛上歌词，不影响展开页。");
+                        });
+                        settings_label(ui,"全局快捷键");
+                        settings_card(ui,|ui|{
+                            ui.small("出厂不绑定。填写组合键，例如 Ctrl+Alt+P。被占用的那一条不会影响其余。");
+                            ui.add_space(4.0);
+                            for index in 0..crate::hotkeys::COUNT {
+                                ui.horizontal(|ui|{
+                                    ui.label(crate::hotkeys::LABELS[index]);
+                                    let edit=ui.add(egui::TextEdit::singleline(&mut self.settings.hotkeys[index]).desired_width(160.0));
+                                    if edit.changed(){self.settings.hotkeys[index]=self.settings.hotkeys[index].trim().to_string();}
+                                    if crate::hotkeys::failed(index){ui.colored_label(egui::Color32::from_rgb(220,120,80),"未生效：已被占用");}
+                                });
+                            }
                         });
                         settings_label(ui,"歌词外观");
                         settings_card(ui,|ui|{
@@ -1825,7 +1865,10 @@ impl App {
                                     if ui.button("连接所有应用通知").clicked(){self.pending.push(Cmd::RequestNotifications);}
                                 });
                             }
-                            ui.label(egui::RichText::new("QQ 需开启系统通知；新通知在岛上显示约 4.5 秒，默认隐藏正文。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
+                            let mut dwell=self.settings.notification_dwell_secs;
+                            if setting_number(ui,"横幅停留",&mut dwell,2.0,10.0," 秒",0.5){self.settings.notification_dwell_secs=dwell.clamp(2.0,10.0);}
+                            ui.label(egui::RichText::new("只影响微信、QQ 和系统通知横幅及其铃铛。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
+                            ui.label(egui::RichText::new("QQ 需开启系统通知；默认隐藏正文。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
                             ui.separator();
                             setting_row(ui,"显示通知正文","可能包含私密消息；屏幕共享时建议关闭",&mut self.settings.notification_preview);
                             ui.label(egui::RichText::new("只接收 Windows 通知中心可见的内容；应用会在收到通知后出现在下方。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
@@ -2145,6 +2188,7 @@ impl App {
                             ui.label(egui::RichText::new("桌面顶部的音乐、专注、提醒与日程小助手。").size(12.0).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
                             ui.horizontal_wrapped(|ui|{
                                 if ui.button("打开本地数据目录").clicked(){self.pending.push(Cmd::Open(crate::model::config_dir()));}
+                                if ui.button("再次打开引导").clicked(){self.wizard_step=Some(0);self.settings_tab=0;}
                                 if ui.button("收集诊断").clicked(){
                                     // 另起 `yunyu.exe --collect-diagnostics`：在新窗口里收集，诊断包保存到桌面并自动选中。
                                     if crate::diagnostics_tool::launch().is_err(){self.say("无法启动诊断收集，请从开始菜单打开「收集云屿诊断」");}
@@ -2164,6 +2208,12 @@ impl App {
             ctx.set_style(original_style);
         });
         if !self.settings_open{self.window_layout().close();self.weather_source.close();}else{self.weather_tutorial_ui(ctx);}
+    }
+
+    fn finish_wizard(&mut self) {
+        self.wizard_step=None;
+        self.settings.first_run_done=true;
+        self.settings.save();
     }
 }
 

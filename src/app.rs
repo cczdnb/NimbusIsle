@@ -556,6 +556,9 @@ pub(crate) struct LyricsState {
     pub lyrics: Option<lyrics::Lyrics>,
     pub rx: Option<std::sync::mpsc::Receiver<Result<(lyrics::Lyrics,bool), lyrics::FetchError>>>,
     pub native_rx: Option<std::sync::mpsc::Receiver<Option<lyrics::Lyrics>>>,
+    /// 当前横滑句子和它开始显示的时刻。换句后年龄归零。
+    pub(crate) marquee_line: String,
+    pub(crate) marquee_at: f64,
 }
 
 /// v0.5.5：邮件面板与设置表单的界面状态。正文只在内存里过一次，不落盘。
@@ -810,6 +813,8 @@ pub struct App {
 
     // 音乐
     pub(crate) ly: LyricsState,
+    /// 首次引导进行到哪一步。完成后为 None。
+    pub(crate) wizard_step: Option<u8>,
     pub(crate) ly_worker: Option<std::thread::JoinHandle<()>>,
     pub(crate) show_lyrics: bool,
     island_lyric_layout: Option<std::sync::Arc<egui::Galley>>,
@@ -923,6 +928,7 @@ impl App {
         let (bw, bh) = if settings.minimal { (BAR_W_MIN, BAR_H_MIN) } else { (BAR_W, BAR_H) };
         let focus_seconds=settings.focus_minutes as f32*60.0;
         let initial_lyrics=settings.lyrics_enabled;
+        let show_wizard = !settings.first_run_done;
         let initial_page=settings.page_order.iter().copied().find(|page|settings.visible_pages[*page]).unwrap_or(0);
         let weather_source=crate::weather_source_ui::State::load();
         let mut weather=crate::weather::State::load(&settings.weather_city,settings.weather_position.as_ref());
@@ -1004,13 +1010,14 @@ impl App {
             buf: String::new(),
             todo_pop: Spring::new(0.0, 500.0, 0.45),
             ly: LyricsState::default(),
+            wizard_step: show_wizard.then_some(0),
             ly_worker: None,
             show_lyrics: initial_lyrics,
             island_lyric_layout: None,
             media_anchor: (String::new(), 0.0, 0.0, false),
             media: NowPlaying::default(),
             music_artwork: None,
-            forced_open_until:0.0, settings_open:false, settings_window:std::sync::Arc::new(std::sync::Mutex::new(crate::settings_window::State::load())), displays:Vec::new(), browser_at_top:false, browser_minimal_active:false, glass_tint:0.0, fluid:Default::default(), fluid_origin:Pos2::ZERO, fluid_art:None, fluid_title:String::new(), screen:None, settings_focus_requested:false, settings_tab:0, settings_category:0, messenger_statuses:Default::default(), notification_apps:model::NotificationApps::load(), subpage:None, task_dialog:None,
+            forced_open_until:0.0, settings_open:show_wizard, settings_window:std::sync::Arc::new(std::sync::Mutex::new(crate::settings_window::State::load())), displays:Vec::new(), browser_at_top:false, browser_minimal_active:false, glass_tint:0.0, fluid:Default::default(), fluid_origin:Pos2::ZERO, fluid_art:None, fluid_title:String::new(), screen:None, settings_focus_requested:false, settings_tab:0, settings_category:0, messenger_statuses:Default::default(), notification_apps:model::NotificationApps::load(), subpage:None, task_dialog:None,
             listener_status: "尚未连接".into(),
             notification_bell_until: 0.0, notification_bell_at: -10.0, notice: None, hud_notice: None, hud_alpha: 0.0, notice_width:Spring::new(0.0,CLOSE.0,CLOSE.1), notice_details:false, pending_messengers:Vec::new(), messenger_scroll:0.0, alerts: Default::default(), history: Default::default(), pending: vec![],
             todo_first: 0, remote_todo_first: 0, remote_todo_focus: None, remote_todo_keep_first: false, nudge_started_at: None, nudge_timed_out: false, nudge_session_keys: Vec::new(), todo_choosing: false, pet: Default::default(), last_drink: None,
@@ -1049,6 +1056,16 @@ impl App {
     pub fn say(&mut self, msg: impl Into<String>) {
         self.toast = Some((msg.into(), self.t));
         self.toast_below = false;
+    }
+
+    /// 双击封面：按媒体来源对到播放器进程，再把主窗口置前。找不到就用短提示。
+    pub(crate) fn open_player(&mut self) {
+        #[cfg(windows)]
+        let opened = crate::smtc::music_log::player_exe(&self.media.source)
+            .is_some_and(crate::smtc::player_process::activate_named);
+        #[cfg(not(windows))]
+        let opened = false;
+        if !opened { self.say("请打开客户端后重试"); }
     }
 
     pub fn messenger_unavailable(&mut self, message: impl Into<String>) {
@@ -1717,6 +1734,16 @@ impl App {
         // 普通收起态的自动 Now Playing 走 auto_now_playing，与时钟、额度并排，不占用这条专用岛。
         self.settings.island_lyrics && self.settings.visible_pages[0]
     }
+
+    /// 当前句有译文时，岛上歌词条加高，避免原文和译文挤在一行里。
+    fn island_lyric_bar_height(&self) -> f32 {
+        if !self.settings.lyric_translation { return BAR_H; }
+        let Some((index, _)) = self.matching_lyric_line() else { return BAR_H; };
+        let has = self.ly.lyrics.as_ref()
+            .and_then(|lyrics| lyrics.enhance.for_line(index))
+            .is_some_and(|line| !line.translation.trim().is_empty());
+        if has { BAR_H + 22.0 } else { BAR_H }
+    }
     pub(crate) fn auto_now_playing(&self)->bool {
         if self.side() || self.effective_minimal() {return false;}
         if self.island_lyrics_active() {return false;}
@@ -1769,27 +1796,23 @@ impl App {
             } else {self.media.title.trim()};
         let ink=if current.is_some()||title{theme::WHITE}else{theme::GRAY};
         let font=self.settings.lyric_font();
-        let layout=|text:String| {
-            let mut job=egui::text::LayoutJob::simple(text,theme::font(font,W::Semibold),ink,LYRIC_BAR_W-80.0);
-            job.halign=egui::Align::LEFT;
-            job.wrap.break_anywhere=true;
-            if title {job.wrap.max_rows=1;}
-            ctx.fonts(|fonts|fonts.layout_job(job))
-        };
-        let mut galley=layout(text.to_owned());
-        if let Some((index,_))=current.filter(|_|galley.rows.len()>1) {
-            let lyrics=self.ly.lyrics.as_ref().unwrap();
-            let start=lyrics.lines[index].t;
-            let end=lyrics.lines.iter().skip(index+1).find(|line|line.t>start).map_or(self.media.duration as f32,|line|line.t);
-            let progress=if end>start {((self.lyric_position()-start)/(end-start)).clamp(0.0,1.0)}else{0.0};
-            // 按当前句的时间范围与各段字数切换，暂停和跳转直接跟随播放位置。
-            let total:usize=galley.rows.iter().map(|row|row.glyphs.len()).sum();
-            let mut count=0;
-            let page=galley.rows.iter().position(|row|{count+=row.glyphs.len();progress*(total as f32)<count as f32}).unwrap_or(galley.rows.len()-1);
-            let segment=galley.rows[page].glyphs.iter().map(|glyph|glyph.chr).collect::<String>();
-            galley=layout(segment.trim().to_owned());
-        }
+        // 歌词按整句排成一行，长句由绘句函数在槽内横滑。歌名兜底仍限制一行并省略。
+        let wrap=if current.is_some(){f32::INFINITY}else{LYRIC_BAR_W-80.0};
+        let mut job=egui::text::LayoutJob::simple(text.to_owned(),theme::font(font,W::Semibold),ink,wrap);
+        job.halign=egui::Align::LEFT;
+        job.wrap.break_anywhere=current.is_none();
+        job.wrap.max_rows=1;
+        let galley=ctx.fonts(|fonts|fonts.layout_job(job));
         self.island_lyric_layout=Some(galley);
+    }
+
+    /// 当前这句歌词出现后经过的秒数。句子变了就从头计，横滑不会接着上一句。
+    pub(crate) fn lyric_line_age(&mut self, line: &str) -> f32 {
+        if self.ly.marquee_line != line {
+            self.ly.marquee_line = line.to_owned();
+            self.ly.marquee_at = self.t;
+        }
+        (self.t - self.ly.marquee_at).max(0.0) as f32
     }
 
     pub(crate) fn effective_minimal(&self)->bool {self.settings.minimal || self.browser_minimal_active}
@@ -1871,6 +1894,32 @@ impl App {
         }
         self.show_page(REMOTE_TODO_PAGE);
     }
+    pub(crate) fn draw_meter(&self, c: &Card, x: f32, layout: &crate::bar_layout::Layout, slot: usize, tag: &str, value: f32) {
+        let alpha = layout.pet_clearance(slot);
+        let faded = c.faded(alpha);
+        let faded = if alpha < 0.8 { faded.ghost() } else { faded };
+        let width = layout.widths.get(slot).copied().unwrap_or(crate::bar_layout::METER_WIDTH);
+        let left = x - width / 2.0;
+        let pct = if value.is_finite() { format!("{value:.0}%") } else { "—".into() };
+        let colors = crate::sys_meter::meter_colors(crate::sys_meter::meter_band(tag == "CPU", value));
+        faded.fill(left, 5.0, 26.0, 12.0, 3.5, colors.tag);
+        faded.text(left + 13.0, 14.2, tag, 8.0, W::Bold, theme::WHITE, H::Center);
+        faded.text(left + 30.0, 14.6, &pct, 10.0, W::Semibold, theme::WHITE, H::Left);
+        faded.fill(left, 20.0, width, 3.0, 1.5, colors.track);
+        if value.is_finite() {
+            let fill = width * (value / 100.0).clamp(0.0, 1.0);
+            if fill > 0.8 { faded.fill(left, 20.0, fill, 3.0, 1.5, colors.bar); }
+        }
+        let tip = if !value.is_finite() {
+            if tag == "CPU" { "处理器采样中".into() } else { "内存采样中".into() }
+        } else if tag == "CPU" {
+            format!("处理器 {value:.0}%")
+        } else {
+            format!("内存 {value:.0}%")
+        };
+        let _ = crate::quota_ui::bar_tooltip(c.hit(left, 2.0, width, 24.0, ("meter", slot)), tip);
+    }
+
     fn draw_resident_todo_nudge(&mut self, c: &Card, x: f32, layout: &crate::bar_layout::Layout) {
         let count = self.todo_sync.pending_nudges().len();
         if count == 0 { return; }
@@ -1907,7 +1956,7 @@ impl App {
             return self.side_base_size(self.effective_minimal()&&self.t>=self.notification_bell_until);
         }
         if self.island_lyrics_active() {
-            (self.lyric_island_width(),BAR_H)
+            (self.lyric_island_width(), self.island_lyric_bar_height())
         } else if self.effective_minimal()&&self.t>=self.notification_bell_until {
             (BAR_W_MIN, BAR_H_MIN)
         } else {
@@ -1997,7 +2046,7 @@ impl App {
         let bell=self.t<self.notification_bell_until&&!self.compact_notices();
         self.resident_power=(env.battery,env.charging);
         let show_music_slot=self.media.is_music()&&!bell&&!self.auto_now_playing();
-        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible());
+        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem);
         layout.reorder(&self.settings.resident_order);
         for (position,extra) in self.quota_balance_layout(&ctx){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
@@ -3046,7 +3095,7 @@ impl App {
         let progress = self.settings.lyric_progress && self.media.duration>0.1;
         self.playing_bar_width = width;
         self.playing_media_w = (width - crate::media_inline::PAD * 2.0).max(80.0);
-        self.playing_bar_height = crate::media_inline::row_height(font, second, progress);
+        self.playing_bar_height = crate::media_inline::row_height(font, second, progress, self.settings.lyric_multiline && lyric);
         self.playing_show_clock = false;
         self.playing_show_weather = false;
     }
@@ -3069,27 +3118,42 @@ impl App {
         let media_left = left + PAD;
         let anchor_right = (media_left + self.playing_media_w + 18.0).min(left + width - 4.0).max(media_left + 80.0);
         let bar = c.rect(left, 0.0, width, row_h);
+        if self.settings.cover_tint {
+            if let Some((image, _)) = &self.music_artwork {
+                let rgb = crate::fluid::Fluid::tint_from_image(image);
+                let tint = Color32::from_rgba_unmultiplied((rgb[0]*255.0).round() as u8, (rgb[1]*255.0).round() as u8, (rgb[2]*255.0).round() as u8, 72);
+                // 铺满岛体下半截：上边平直，底边圆角与收起岛体相同，不再另画一条胶囊。
+                let radius = if self.settings.island_shape == crate::model::IslandShape::Pill { BAR_H * 0.5 } else { 12.5 };
+                let rect = c.rect(left, -MEDIA_ROW_GAP, width, row_h + MEDIA_ROW_GAP);
+                crate::shape::fill(&c.painter, rect, 0.0, 0.0, radius, tint, 1.0 / c.ui.ctx().pixels_per_point());
+            }
+        }
         let hovered = env.cursor.is_some_and(|p| bar.contains(p));
-        let display = self.synced_lyric_display();
-        let lyrics = self.ly.lyrics.as_ref();
-        let idx = display.and_then(|(i, _)| i);
-        let enh = idx.and_then(|i| lyrics.and_then(|l| l.enhance.for_line(i)));
-        let trans_owned = if self.settings.lyric_translation {
-            enh.map(|e| e.translation.clone()).unwrap_or_default()
-        } else { String::new() };
+        let (idx, lyric_owned, anim_index, words_owned, trans_owned, line_t, next_t) = {
+            let display = self.synced_lyric_display();
+            let lyrics = self.ly.lyrics.as_ref();
+            let idx = display.and_then(|(i, _)| i);
+            let enh = idx.and_then(|i| lyrics.and_then(|l| l.enhance.for_line(i)));
+            let trans_owned = if self.settings.lyric_translation {
+                enh.map(|e| e.translation.clone()).unwrap_or_default()
+            } else { String::new() };
+            let words_owned = enh.map(|e| e.words.clone()).unwrap_or_default();
+            let next_t = idx.and_then(|i| lyrics.and_then(|l| l.lines.get(i + 1).map(|n| n.t)));
+            let line_t = idx.and_then(|i| lyrics.and_then(|l| l.lines.get(i).map(|x| x.t))).unwrap_or(0.0);
+            let anim_index = match &display {
+                Some((Some(i), _)) => *i as f32,
+                Some((None, "前奏")) => -1.0,
+                Some((None, _)) => -2.0,
+                None => -10.0,
+            };
+            (idx, display.map(|(_, text)| text.to_owned()), anim_index, words_owned, trans_owned, line_t, next_t)
+        };
+        let line_age = lyric_owned.as_deref().map(|line| self.lyric_line_age(line)).unwrap_or(0.0);
         let trans = trans_owned.as_str();
-        let words = enh.map(|e| e.words.as_slice()).unwrap_or(&[]);
-        let next_t = idx.and_then(|i| lyrics.and_then(|l| l.lines.get(i + 1).map(|n| n.t)));
-        let line_t = idx.and_then(|i| lyrics.and_then(|l| l.lines.get(i).map(|x| x.t))).unwrap_or(0.0);
+        let words = words_owned.as_slice();
         let karaoke = if idx.is_some() {
             crate::lyric_enhance::scan_progress(line_t, next_t, words, self.lyric_position())
         } else { 0.0 };
-        let anim_index = match &display {
-            Some((Some(i), _)) => *i as f32,
-            Some((None, "前奏")) => -1.0,
-            Some((None, _)) => -2.0,
-            None => -10.0,
-        };
         let id = egui::Id::new("media-inline-lyric");
         let shown = c.ui.ctx().animate_value_with_time(id, anim_index, 0.22);
         let fade = 1.0 - (anim_index - shown).abs().min(1.0);
@@ -3098,11 +3162,10 @@ impl App {
         let timeline = if self.settings.lyric_progress && self.media.duration > 0.1 {
             Some((self.media.position / self.media.duration).clamp(0.0, 1.0) as f32)
         } else { None };
-        let lyric_text = display.map(|(_, s)| s);
         let data = media_inline::InlinePaint {
             title: self.media.title.trim(),
             artist: self.media.artist.trim(),
-            lyric: lyric_text,
+            lyric: lyric_owned.as_deref(),
             prev_lyric: prev_owned.as_deref(),
             trans,
             words,
@@ -3119,15 +3182,22 @@ impl App {
             playing: self.media.playing,
             artwork,
             time: self.t,
+            line_age,
+            rows: if self.settings.lyric_multiline && lyric_owned.is_some() { 2 } else { 1 },
         };
         if let Some(which) = media_inline::paint_inline(&clip, media_left, anchor_right, row_h, hovered, &data) {
+            if which == media_inline::InlineAction::Activate {
+                self.open_player();
+            } else {
             let cmd = match which {
                 InlineAction::Prev => crate::smtc::Transport::Prev,
                 InlineAction::Next => crate::smtc::Transport::Next,
                 InlineAction::Toggle => crate::smtc::Transport::Toggle,
                 InlineAction::Seek(secs) => crate::smtc::Transport::Seek(secs),
+                InlineAction::Activate => unreachable!(),
             };
             self.pending.push(Cmd::Media(cmd));
+            }
         }
     }
 
@@ -3146,7 +3216,7 @@ impl App {
             let pet_slot=if self.pet_enabled(){48.0}else{0.0};
             let music_left=left+pet_slot;
             let music_w=(content_width-pet_slot).max(LYRIC_BAR_W.min(content_width));
-            let center_y=BAR_H/2.0;
+            let center_y=self.island_lyric_bar_height()/2.0;
             if let Some((image,texture))=&self.music_artwork {
                 let [width,height]=image.size;
                 let uv_size=if width>height {egui::vec2(height as f32/width as f32,1.0)}else{egui::vec2(1.0,width as f32/height as f32)};
@@ -3155,6 +3225,9 @@ impl App {
             } else {
                 c.fill(music_left+12.0,center_y-10.0,20.0,20.0,5.0,theme::CARD);
                 paint::note(&c,music_left+22.0,center_y,13.0,theme::WHITE);
+            }
+            if c.hit(music_left+12.0,center_y-10.0,20.0,20.0,"island-cover").double_clicked() {
+                self.open_player();
             }
             let index=lyric.unwrap_or(0);
             let id=egui::Id::new("island-lyric-line");
@@ -3184,7 +3257,8 @@ impl App {
             let y_off=if self.settings.lyric_anim==crate::model::LyricAnim::Scan {(1.0-fade)*3.0}else{0.0};
             let has_trans=!trans.is_empty();
             let font_sz=self.settings.lyric_font();
-            let text_y=if has_trans {center_y-9.0+y_off}else{center_y-galley.size().y/2.0+y_off};
+            let trans_sz=(font_sz*0.75).max(8.0);
+            let text_y=if has_trans {center_y-font_sz-4.0+y_off}else{center_y-galley.size().y/2.0+y_off};
             let dim=if lyric.is_some(){Color32::from_gray(150)}else{theme::GRAY};
             let lit=if lyric.is_some(){theme::WHITE}else{theme::GRAY};
             if lyric.is_none() && words.is_empty() && !has_trans {
@@ -3196,15 +3270,16 @@ impl App {
                 let position=c.pos(gx,center_y-galley.size().y/2.0+y_off);
                 c.painter.galley(position,galley,lit);
             } else {
-                let prev_line=self.previous_lyric_text(lyric).map(|s| crate::media_inline::truncate_to_width(&c,s,font_sz,W::Semibold,lyric_w));
-                // 长句沿用预先分段的当前段，避免只截首段。
-                let shown=if !galley.text().is_empty(){galley.text()}else{line_text.as_str()};
-                let fitted=c.fit(shown,font_sz,W::Semibold,lyric_w);
-                let _size=crate::lyric_enhance::paint_lyric_line(&c.painter,c.pos(lyric_left,text_y),&fitted,prev_line.as_deref(),c.font(font_sz,W::Semibold),dim,lit,progress,fade,self.settings.lyric_anim,lyric_w*c.s,1,self.settings.lyric_align);
+                let prev_owned=self.previous_lyric_text(lyric).map(|s| s.to_owned());
+                let shown=if !line_text.is_empty(){line_text.clone()}else{galley.text().to_string()};
+                let age=self.lyric_line_age(&shown);
+                let _size=crate::lyric_enhance::paint_lyric_line(&c.painter,c.pos(lyric_left,text_y),&shown,prev_owned.as_deref(),c.font(font_sz,W::Semibold),dim,lit,progress,fade,self.settings.lyric_anim,lyric_w*c.s,1,self.settings.lyric_align,age);
                 if has_trans {
+                    let trans_top=text_y+font_sz+10.0;
+                    let band=c.clipped(lyric_left,trans_top,lyric_w,trans_sz+4.0);
                     let tx=match self.settings.lyric_align { crate::model::LyricAlign::Left=>lyric_left, crate::model::LyricAlign::Center=>lyric_left+lyric_w/2.0 };
                     let th=match self.settings.lyric_align { crate::model::LyricAlign::Left=>H::Left, crate::model::LyricAlign::Center=>H::Center };
-                    c.text(tx,center_y+8.0+y_off,&c.fit(&trans,(font_sz*0.75).max(8.0),W::Regular,lyric_w),(font_sz*0.75).max(8.0),W::Regular,Color32::from_gray(160),th);
+                    band.text(tx,trans_top+trans_sz,&trans,trans_sz,W::Regular,Color32::from_gray(160),th);
                 }
             }
             let cx_btn=music_left+music_w-controls_w+8.0;
@@ -3318,6 +3393,17 @@ impl App {
             let c=base.faded(compact_alpha);let c=if compact_alpha<0.8{c.ghost()}else{c};
             self.draw_quota_bar(&c,local_cx,&layout);
             if let Some(x)=layout.x[bar::WEATHER] { self.draw_pill_weather(&c,local_cx+x,&layout); }
+            if let Some(x)=layout.x[bar::CPU] {
+                let value=crate::sys_meter::current().map(|reading|reading.cpu).unwrap_or(f32::NAN);
+                self.draw_meter(&c,local_cx+x,&layout,bar::CPU,"CPU",value);
+            }
+            if let Some(x)=layout.x[bar::MEM] {
+                let value=crate::sys_meter::current().map(|reading|reading.mem).unwrap_or(f32::NAN);
+                self.draw_meter(&c,local_cx+x,&layout,bar::MEM,"RAM",value);
+            }
+            if self.settings.show_cpu || self.settings.show_mem {
+                c.ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
+            }
             if let Some(x)=layout.x[bar::REMOTE_TODO] { self.draw_resident_todo_nudge(&c,local_cx+x,&layout); }
         }
         if self.pomo.running && compact_alpha>0.004 {
@@ -3517,9 +3603,11 @@ impl App {
     fn tick(&mut self, env: &Env, dt: f32, elapsed: f32) {
         if self.toast.as_ref().is_some_and(|(_,at)|self.t-at>2.4){self.toast=None;}
         // 跳转后先用本地目标位置显示；播放器回报追上了、换歌了或超时就交还真实位置。
+        // 确认看采样本身，不用界面上顶着的目标，否则旧采样还没到就会被当成已经跳过去。
         let seek_done=self.music_seek_ui.as_ref().is_some_and(|(target,title)|{
-            (self.media.duration>0.0 && (self.media.position-*target).abs()<1.5)
-                || self.t>=self.music_seek_quiet_until || &self.media.title!=title
+            let sample=&env.media;
+            (sample.duration>0.0 && sample.title==*title && (sample.position-*target).abs()<1.5)
+                || self.t>=self.music_seek_quiet_until || sample.title!=*title
         });
         if seek_done {self.music_seek_ui=None;}
         if self.music_restart_at.is_some_and(|at|self.t>=at+1.5){self.music_restart_at=None;}
@@ -3654,6 +3742,13 @@ impl App {
                 else {*pos};
             if m.duration>0.0 {np.position=np.position.min(m.duration);}
         }
+        if let Some((target,title))=self.music_seek_ui.clone() {
+            if title==m.title && env.t<self.music_seek_quiet_until && !seek_sample_confirmed(m.position,target,m.duration) {
+                let elapsed=if m.playing {(env.t-(self.music_seek_quiet_until-2.5)).max(0.0)}else{0.0};
+                np.position=held_seek_position(target,elapsed,m.duration);
+                self.media_anchor=(m.title.clone(),np.position,env.t,m.playing);
+            }
+        }
         // 网易云的 song_id 只来自本机日志，SMTC 那一路没有；None 与 Some 之间来回不是换歌，不能每次都清空歌词重查。
         let other_song=matches!((self.media.song_id,np.song_id),(Some(old),Some(new)) if old!=new);
         if self.media.source != np.source || other_song { self.ly=LyricsState::default(); }
@@ -3765,6 +3860,8 @@ impl App {
             // 快速切歌时本机轮询线程已满：不留空通道，之后的定时重试会再次启动。
             if native.is_none(){self.ly.native_rx=None;}
         }
+        // 在线取词必须同时有歌名和歌手。本地读取走上面的线程，不在这里排队。
+        if title.trim().is_empty() || artist.trim().is_empty() {return;}
         self.ly.pending=Some(LyricsJob{source,title,artist,duration:dur,song_id,cached,native_only,manual});
     }
 
@@ -3873,4 +3970,23 @@ impl App {
             if added {self.open_task_reminder(0);}
         }
     }
+}
+
+/// 播放器还停在跳转前的位置时，界面继续显示目标，不被旧采样盖住。
+fn seek_sample_confirmed(reported: f64, target: f64, duration: f64) -> bool {
+    duration > 0.0 && (reported - target).abs() < 1.5
+}
+
+fn held_seek_position(target: f64, elapsed: f64, duration: f64) -> f64 {
+    let held = (target + elapsed.max(0.0)).max(0.0);
+    if duration > 0.0 { held.min(duration) } else { held }
+}
+
+#[test]
+fn pending_seek_keeps_the_target_until_the_player_reports_it() {
+    assert!(!seek_sample_confirmed(14.0, 60.0, 180.0));
+    assert!(seek_sample_confirmed(60.4, 60.0, 180.0));
+    assert!(!seek_sample_confirmed(60.0, 60.0, 0.0), "没有总时长时不能靠旧位置凑巧确认");
+    assert!((held_seek_position(60.0, 1.2, 180.0) - 61.2).abs() < 1e-9);
+    assert_eq!(held_seek_position(60.0, 0.0, 0.0), 60.0);
 }

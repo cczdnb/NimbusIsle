@@ -414,8 +414,8 @@ impl eframe::App for Shell {
             if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(self.placement_scale,daozai::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),offset,self.app.settings.dock,shift))) {
                 if !self.placed {diagnostics::startup("目标屏幕物理坐标定位完成，已请求显示");}
                 self.placed=true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            } else if self.t0.elapsed()>=Duration::from_secs(2) {
+                if !daozai::hotkeys::hidden() { ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true)); }
+            } else if self.t0.elapsed()>=Duration::from_secs(2) && !daozai::hotkeys::hidden() {
                 // Do not leave a hidden startup window forever when monitor discovery fails.
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             }
@@ -654,7 +654,32 @@ impl eframe::App for Shell {
                 }
             }
         }
-        for cmd in out.cmds {
+        let mut commands=out.cmds;
+        #[cfg(windows)] {
+            if let Some(hwnd)=self.native.as_ref().map(|window| window.hwnd().0 as isize) {
+                daozai::hotkeys::install_native(hwnd, &self.app.settings.hotkeys);
+            }
+            while let Some(action)=daozai::hotkeys::poll() {
+                let command=match action {
+                    daozai::hotkeys::Action::Toggle=>Some(smtc::Transport::Toggle),
+                    daozai::hotkeys::Action::Prev=>Some(smtc::Transport::Prev),
+                    daozai::hotkeys::Action::Next=>Some(smtc::Transport::Next),
+                    daozai::hotkeys::Action::Back|daozai::hotkeys::Action::Forward=>{
+                        let delta=if action==daozai::hotkeys::Action::Back {-5.0}else{5.0};
+                        self.media.lock().ok().map(|media|{
+                            let target=(media.position+delta).max(0.0);
+                            let target=if media.duration>0.0 {target.min(media.duration)}else{target};
+                            smtc::Transport::Seek(target)
+                        })
+                    }
+                    daozai::hotkeys::Action::Island=>{daozai::hotkeys::toggle_hidden();None}
+                };
+                if let Some(command)=command {commands.push(Cmd::Media(command));}
+            }
+            if daozai::hotkeys::hidden() { ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false)); }
+            else if daozai::hotkeys::take_show() { ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true)); }
+        }
+        for cmd in commands {
             match cmd {
                 Cmd::Media(t) => {
                     self.media_fast_until=Some(Instant::now()+Duration::from_secs(3));self.media_enabled.set_interval(smtc::POLL_FAST);

@@ -362,6 +362,21 @@ pub fn decode_cache(raw: &str) -> Option<LyricsEnhance> {
 }
 
 
+/// 单行比槽宽更长时的横向偏移（像素，向左为正）。
+/// 开头停留、滑到末尾、末尾停留，然后回到开头。短句返回 0。
+pub fn marquee_offset(text_width: f32, slot: f32, age: f32) -> f32 {
+    let overflow = text_width - slot;
+    if overflow <= 1.0 || slot <= 1.0 || !overflow.is_finite() { return 0.0; }
+    let pause = 0.7;
+    let speed = 28.0;
+    let travel = overflow / speed;
+    let cycle = pause + travel + pause;
+    let t = if age.is_finite() { age.rem_euclid(cycle) } else { 0.0 };
+    if t < pause { 0.0 }
+    else if t < pause + travel { (t - pause) * speed }
+    else { overflow }
+}
+
 /// 绘制带扫光的一行歌词：先画暗色全文，再按进度裁出亮色。
 pub fn paint_scanned(
     painter: &eframe::egui::Painter,
@@ -373,8 +388,9 @@ pub fn paint_scanned(
     progress: f32,
     max_width: f32,
     max_rows: usize,
+    line_age: f32,
 ) -> eframe::egui::Vec2 {
-    paint_scanned_aligned(painter, pos, text, font, dim, lit, progress, max_width, max_rows, crate::model::LyricAlign::Left)
+    paint_scanned_aligned(painter, pos, text, font, dim, lit, progress, max_width, max_rows, crate::model::LyricAlign::Left, line_age)
 }
 
 pub fn paint_scanned_aligned(
@@ -388,37 +404,52 @@ pub fn paint_scanned_aligned(
     max_width: f32,
     max_rows: usize,
     align: crate::model::LyricAlign,
+    line_age: f32,
 ) -> eframe::egui::Vec2 {
     // Always lay out left-aligned, then shift the origin so Center sits inside
     // [pos.x, pos.x + max_width]. Using job.halign = Center makes egui treat
     // `pos` as the midline, which would overflow left into the cover art.
+    // 单行先按不换行测量：放得下就按对齐画；放不下就在槽内裁切并横向滚动。
+    let single = max_rows <= 1;
+    let slot = max_width.max(0.0);
     let layout = |color: eframe::egui::Color32| {
-        let mut job = eframe::egui::text::LayoutJob::simple(text.to_string(), font.clone(), color, max_width);
+        let wrap = if single { f32::INFINITY } else { slot.max(1.0) };
+        let mut job = eframe::egui::text::LayoutJob::simple(text.to_string(), font.clone(), color, wrap);
         job.wrap.max_rows = max_rows.max(1);
-        job.wrap.break_anywhere = true;
+        job.wrap.break_anywhere = !single;
         job.halign = eframe::egui::Align::LEFT;
         painter.layout_job(job)
     };
     let galley = layout(dim);
     let size = galley.size();
-    let origin = match align {
-        crate::model::LyricAlign::Left => pos,
-        crate::model::LyricAlign::Center => {
-            let w = size.x.min(max_width.max(0.0));
-            pos + eframe::egui::vec2(((max_width - w) * 0.5).max(0.0), 0.0)
+    let scrolling = size.x > slot + 1.0;
+    let shift = if scrolling { marquee_offset(size.x, slot, line_age) } else { 0.0 };
+    let origin = if scrolling {
+        pos - eframe::egui::vec2(shift, 0.0)
+    } else {
+        match align {
+            crate::model::LyricAlign::Left => pos,
+            crate::model::LyricAlign::Center => {
+                let w = size.x.min(slot);
+                pos + eframe::egui::vec2(((slot - w) * 0.5).max(0.0), 0.0)
+            }
         }
     };
-    painter.galley(origin, galley, dim);
+    let slot_clip = eframe::egui::Rect::from_min_size(pos, eframe::egui::vec2(slot.max(1.0), size.y.max(font.size)));
+    let base = if scrolling { painter.with_clip_rect(slot_clip.intersect(painter.clip_rect())) } else { painter.clone() };
+    base.galley(origin, galley, dim);
     let p = progress.clamp(0.0, 1.0);
     if p > 0.002 && p < 0.999 {
         let galley = layout(lit);
-        let clip = eframe::egui::Rect::from_min_size(origin, eframe::egui::vec2(size.x * p + 0.5, size.y));
-        let clipped = painter.with_clip_rect(clip.intersect(painter.clip_rect()));
+        let scan = eframe::egui::Rect::from_min_size(origin, eframe::egui::vec2(size.x * p + 0.5, size.y));
+        let clip = if scrolling { scan.intersect(slot_clip) } else { scan };
+        let clipped = base.with_clip_rect(clip.intersect(painter.clip_rect()));
         clipped.galley(origin, galley, lit);
     } else if p >= 0.999 {
-        painter.galley(origin, layout(lit), lit);
+        base.galley(origin, layout(lit), lit);
     }
-    size
+    if scrolling { painter.ctx().request_repaint(); }
+    eframe::egui::vec2(if scrolling { slot } else { size.x }, size.y)
 }
 
 fn with_alpha(color: eframe::egui::Color32, a: f32) -> eframe::egui::Color32 {
@@ -441,15 +472,16 @@ pub fn paint_lyric_line(
     max_width: f32,
     max_rows: usize,
     align: crate::model::LyricAlign,
+    line_age: f32,
 ) -> eframe::egui::Vec2 {
     let fade = fade.clamp(0.0, 1.0);
     match anim {
         crate::model::LyricAnim::Scan => {
-            paint_scanned_aligned(painter, pos, text, font, dim, lit, karaoke, max_width, max_rows, align)
+            paint_scanned_aligned(painter, pos, text, font, dim, lit, karaoke, max_width, max_rows, align, line_age)
         }
         crate::model::LyricAnim::Fade => {
             let color = with_alpha(lit, fade.max(0.08));
-            paint_scanned_aligned(painter, pos, text, font.clone(), color, color, 1.0, max_width, max_rows, align)
+            paint_scanned_aligned(painter, pos, text, font.clone(), color, color, 1.0, max_width, max_rows, align, line_age)
         }
         crate::model::LyricAnim::Scroll => {
             let h = font.size * 1.35;
@@ -459,11 +491,11 @@ pub fn paint_lyric_line(
                 if let Some(prev) = prev.filter(|s| !s.is_empty()) {
                     let up = pos - eframe::egui::vec2(0.0, fade * h);
                     let c = with_alpha(dim, 1.0 - fade);
-                    paint_scanned_aligned(&clipped, up, prev, font.clone(), c, c, 1.0, max_width, max_rows, align);
+                    paint_scanned_aligned(&clipped, up, prev, font.clone(), c, c, 1.0, max_width, max_rows, align, 0.0);
                 }
             }
             let down = pos + eframe::egui::vec2(0.0, (1.0 - fade) * h);
-            paint_scanned_aligned(&clipped, down, text, font, with_alpha(lit, fade.max(0.2)), with_alpha(lit, fade.max(0.2)), 1.0, max_width, max_rows, align)
+            paint_scanned_aligned(&clipped, down, text, font, with_alpha(lit, fade.max(0.2)), with_alpha(lit, fade.max(0.2)), 1.0, max_width, max_rows, align, line_age)
         }
     }
 }
@@ -471,6 +503,17 @@ pub fn paint_lyric_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_line_does_not_scroll_and_long_line_resets_with_age() {
+        assert_eq!(marquee_offset(80.0, 120.0, 3.0), 0.0);
+        assert_eq!(marquee_offset(200.0, 100.0, 0.2), 0.0, "开头应停留");
+        let mid = marquee_offset(200.0, 100.0, 0.7 + 1.0);
+        assert!((mid - 28.0).abs() < 0.1, "停留结束后按固定速度横移，实际 {mid}");
+        assert!((marquee_offset(200.0, 100.0, 0.0)).abs() < 0.01, "换句后的年龄归零，滚动从头开始");
+        let end = marquee_offset(200.0, 100.0, 30.0);
+        assert!(end <= 100.0 + 0.1, "偏移不超过超出的宽度");
+    }
 
     #[test]
     fn yrc_timing_first_splits_words() {

@@ -327,6 +327,11 @@ pub struct Settings {
     pub show_clock: bool,
     pub show_battery: bool,
     pub show_weather: bool,
+    /// 收起时常驻 CPU、内存占用。默认关闭，不另开面板。
+    pub show_cpu: bool,
+    pub show_mem: bool,
+    /// 微信、QQ 和系统通知横幅及其铃铛的停留秒数。
+    pub notification_dwell_secs: f32,
     pub clock_12h: bool,
     pub clock_period: u8,
     pub clock_seconds: bool,
@@ -354,7 +359,13 @@ pub struct Settings {
     pub spectrum_style:SpectrumStyle,
     pub lyric_progress:bool,
     pub lyric_font_size:f32,
+    /// 收起媒体条显示第二行原文。默认关闭，译文仍由 `lyric_translation` 单独控制。
+    pub lyric_multiline:bool,
+    /// 只给收起媒体条铺一层封面主色。默认关闭，不改变流体皮肤的整岛染色。
+    pub cover_tint:bool,
     pub lyric_player_delays:Vec<(String,i32)>,
+    /// 全局快捷键，空字符串表示不注册。顺序：播放暂停、上一首、下一首、快退、快进、唤出或隐藏。
+    pub hotkeys:[String;6],
     pub hide_fullscreen: bool,
     /// 启用顶栏适配，按显示方式避让顶栏或保持岛体在顶栏上方。
     pub avoid_top_bar: bool,
@@ -396,16 +407,21 @@ pub struct Settings {
     pub render_compat: bool,
     /// 自动切换到兼容渲染的原因；手动开启时为空。
     pub render_compat_reason: String,
+    /// 没有设置文件时为假，用来打开首次引导。文件里没有这个键时视为已经用过。
+    pub first_run_done: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9], show_clock: true, show_battery: true, show_weather: true, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_player_delays:Vec::new(), hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new() }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9], show_clock: true, show_battery: true, show_weather: true, show_cpu: false, show_mem: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false }
     }
 }
 
 impl Settings {
     pub fn avoids_top_bar(&self) -> bool { self.avoid_top_bar && !self.top_bar_on_top }
+
+    /// 微信、QQ 和系统通知横幅及其铃铛的停留时间。
+    pub fn notification_dwell(&self) -> f64 { self.notification_dwell_secs.clamp(2.0, 10.0) as f64 }
 
     /// 主窗口（灵动岛）的界面缩放倍率。
     pub fn island_scale(&self) -> f32 {
@@ -451,8 +467,11 @@ impl Settings {
     }
 
     pub fn load() -> Self {
+        let path = config_dir().join("settings.txt");
+        let file_existed = path.is_file();
+        let mut saw_first_run = false;
         let mut s = Self::default();
-        for (k, v) in read_kv(&config_dir().join("settings.txt")) {
+        for (k, v) in read_kv(&path) {
             match k.as_str() {
                 "settings_theme" => s.settings_theme=crate::settings_theme::SettingsTheme::parse(&v),
                 "display_id" => s.display_id = v,
@@ -481,18 +500,23 @@ impl Settings {
                     if order.len()==7 && !order.contains(&crate::bar_layout::REMOTE_TODO) {
                         order.push(crate::bar_layout::REMOTE_TODO);
                     }
+                    if order.len()==8 && !order.contains(&crate::bar_layout::CPU) && !order.contains(&crate::bar_layout::MEM) {
+                        order.push(crate::bar_layout::CPU);
+                        order.push(crate::bar_layout::MEM);
+                    }
                     if crate::bar_layout::valid_order(&order){s.resident_order=order;}
                 }
                 "page_order" => {
                     if let Ok(order)=v.split(',').map(str::parse::<usize>).collect::<Result<Vec<_>,_>>() {
+                        let order=if order.len()==11 && (0..11).all(|page|order.contains(&page)) {
+                            order.into_iter().filter(|page|*page<PAGE_COUNT).collect::<Vec<_>>()
+                        } else { order };
                         if order.len()==PAGE_COUNT && (0..PAGE_COUNT).all(|page|order.contains(&page)) {
                             s.page_order.copy_from_slice(&order);
                         } else if order.len()==9 && (0..9).all(|page|order.contains(&page)) {
-                            // 旧配置没有第三方待办页：接在最后。
                             s.page_order[..9].copy_from_slice(&order);
                             s.page_order[9]=9;
                         } else if order.len()==8 && (0..8).all(|page|order.contains(&page)) {
-                            // 更旧的配置没有天气页和第三方待办页。
                             s.page_order[..8].copy_from_slice(&order);
                             s.page_order[8]=8;
                             s.page_order[9]=9;
@@ -505,9 +529,14 @@ impl Settings {
                 "show_battery" => s.show_battery = v != "0",
                 "show_clock" => s.show_clock = v != "0",
                 "show_weather" => s.show_weather = v != "0",
-                "visible_pages" if (6..=PAGE_COUNT).contains(&v.len()) && v.bytes().all(|b| b==b'0' || b==b'1') => {
+                "show_cpu" => s.show_cpu = v == "1",
+                "show_mem" => s.show_mem = v == "1",
+                "notification_dwell_secs" => s.notification_dwell_secs = v.parse::<f32>().unwrap_or(4.5).clamp(2.0, 10.0),
+                "visible_pages" if (6..=11).contains(&v.len()) && v.bytes().all(|b| b==b'0' || b==b'1') => {
                     for (enabled,value) in s.visible_pages.iter_mut().zip(v.bytes()) { *enabled=value==b'1'; }
-                    for enabled in &mut s.visible_pages[v.len()..]{*enabled=v.bytes().any(|b|b==b'1');}
+                    if v.len()<PAGE_COUNT {
+                        for enabled in &mut s.visible_pages[v.len()..]{*enabled=v.bytes().any(|b|b==b'1');}
+                    }
                 }
                 "read_notifications" => s.read_notifications=v=="1",
                 "wechat_notifications" => s.wechat_notifications=v=="1",
@@ -531,6 +560,12 @@ impl Settings {
                 "spectrum_style" => s.spectrum_style=SpectrumStyle::parse(&v),
                 "lyric_progress" => s.lyric_progress=v!="0",
                 "lyric_font_size" => s.lyric_font_size=v.parse::<f32>().unwrap_or(12.0).clamp(10.0,18.0),
+                "lyric_multiline" => s.lyric_multiline=v=="1",
+                "cover_tint" => s.cover_tint=v=="1",
+                "hotkeys" => {
+                    let parts:Vec<String>=v.split('\u{1}').map(|part|part.chars().filter(|c|!c.is_control()).take(40).collect()).collect();
+                    for (slot,part) in s.hotkeys.iter_mut().zip(parts) { *slot=part; }
+                }
                 "lyric_player_delays" => s.lyric_player_delays=parse_player_delays(&v),
                 "hide_fullscreen" => s.hide_fullscreen = v != "0",
                 "avoid_top_bar" => s.avoid_top_bar = v != "0",
@@ -561,9 +596,11 @@ impl Settings {
                 "weather_saved" => s.weather_saved=serde_json::from_str::<Vec<crate::weather::Position>>(&v).unwrap_or_default().into_iter().filter(|p|p.valid()).collect(),
                 "render_compat" => s.render_compat = v == "1",
                 "render_compat_reason" => s.render_compat_reason = v.chars().filter(|c| !c.is_control()).take(200).collect(),
+                "first_run_done" => { saw_first_run = true; s.first_run_done = v == "1"; }
                 _ => {}
             }
         }
+        if file_existed && !saw_first_run { s.first_run_done = true; }
         if !s.visible_pages.contains(&true) { s.visible_pages[0]=true; }
         // 旧版只有一个指定城市：迁移进已保存列表，升级后下拉框里能直接看到它。
         if let Some(position)=s.weather_position.clone().filter(|p|p.label==s.weather_city) {
@@ -601,6 +638,9 @@ impl Settings {
                 ("show_battery".into(), (self.show_battery as u8).to_string()),
                 ("show_clock".into(), (self.show_clock as u8).to_string()),
                 ("show_weather".into(), (self.show_weather as u8).to_string()),
+                ("show_cpu".into(), (self.show_cpu as u8).to_string()),
+                ("show_mem".into(), (self.show_mem as u8).to_string()),
+                ("notification_dwell_secs".into(), format!("{:.1}", self.notification_dwell_secs.clamp(2.0, 10.0))),
                 ("read_notifications".into(),(self.read_notifications as u8).to_string()),
                 ("wechat_notifications".into(),(self.wechat_notifications as u8).to_string()),
                 ("wecom_notifications".into(),(self.wecom_notifications as u8).to_string()),
@@ -623,6 +663,9 @@ impl Settings {
                 ("spectrum_style".into(),self.spectrum_style.key().into()),
                 ("lyric_progress".into(),(self.lyric_progress as u8).to_string()),
                 ("lyric_font_size".into(),format!("{:.1}",self.lyric_font_size.clamp(10.0,18.0))),
+                ("lyric_multiline".into(),(self.lyric_multiline as u8).to_string()),
+                ("cover_tint".into(),(self.cover_tint as u8).to_string()),
+                ("hotkeys".into(),self.hotkeys.join("\u{1}")),
                 ("lyric_player_delays".into(),format_player_delays(&self.lyric_player_delays)),
                 ("hide_fullscreen".into(), (self.hide_fullscreen as u8).to_string()),
                 ("avoid_top_bar".into(), (self.avoid_top_bar as u8).to_string()),
@@ -653,6 +696,7 @@ impl Settings {
                 ("weather_saved".into(), serde_json::to_string(&self.weather_saved).unwrap()),
                 ("render_compat".into(), (self.render_compat as u8).to_string()),
                 ("render_compat_reason".into(), self.render_compat_reason.clone()),
+                ("first_run_done".into(), (self.first_run_done as u8).to_string()),
             ],
         );
     }
@@ -1023,6 +1067,16 @@ pub fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_dwell_stays_between_two_and_ten_seconds() {
+        let mut settings = Settings::default();
+        assert!((settings.notification_dwell() - 4.5).abs() < 0.01);
+        settings.notification_dwell_secs = 1.0;
+        assert_eq!(settings.notification_dwell(), 2.0);
+        settings.notification_dwell_secs = 30.0;
+        assert_eq!(settings.notification_dwell(), 10.0);
+    }
 
     #[test]
     fn island_appearance_values_are_normalized() {

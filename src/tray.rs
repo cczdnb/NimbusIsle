@@ -301,6 +301,7 @@ fn show_menu_at(hwnd: HWND, ctx: &Ctx, x: i32, y: i32) {
 }
 
 fn show_menu(hwnd: HWND, ctx: &Ctx) {
+    crate::hotkeys::release_hidden();
     unsafe {
         let mut p = POINT::default();
         let _ = GetCursorPos(&mut p);

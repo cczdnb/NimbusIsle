@@ -314,8 +314,10 @@ impl App {
             if hit.on_hover_text(date.format("%Y年%m月%d日").to_string()).clicked(){self.select_calendar_day(*date);}
         }
         let day=self.calendar.view.day;
+        let almanac=crate::almanac::describe(day);
         let heading=format!("{} · {}月{}日",if day==today{"今天"}else{["周一","周二","周三","周四","周五","周六","周日"][day.weekday().num_days_from_monday() as usize]},day.month(),day.day());
         c.text(167.0,44.0,&heading,8.8,W::Semibold,accent,H::Left);
+        c.text(167.0,34.0,&c.fit(&almanac.beside,8.0,W::Regular,150.0),8.0,W::Regular,muted,H::Left);
         let status=if self.calendar.view.loading{"同步中".to_string()}else if !self.calendar.view.error.is_empty(){"重试同步".to_string()}else if !self.calendar.view.warning.is_empty(){"部分同步".to_string()}else {let at=self.calendar.feeds.iter().map(|feed|feed.last_sync.as_str()).max().unwrap_or(&self.calendar.last_sync);if at.is_empty(){"".into()}else{format!("{} 更新",at.split_whitespace().last().unwrap_or(""))}};
         c.text(376.0,44.0,&status,7.4,W::Regular,muted,H::Right);
         let sync_hint=if !self.calendar.view.error.is_empty(){self.calendar.view.error.as_str()}else if !self.calendar.view.warning.is_empty(){self.calendar.view.warning.as_str()}else{"同步这个月份"};
@@ -399,6 +401,7 @@ impl App {
             if hit.on_hover_text(format!("{}\n{}\n{}",event.title,event.at,sources)).clicked(){clicked=Some(entry_key(event));}
         }
         if remaining_count>4 {c.text(376.0,208.0,&format!("列表 {}–{} / {}",first+1,(first+4).min(remaining_count),remaining_count),7.0,W::Regular,muted,H::Right);}
+        c.text(167.0,56.0,&c.fit(&almanac.advice,8.0,W::Regular,150.0),8.0,W::Regular,muted,H::Left);
         self.calendar.view.first=first;
         if toggle_ended{self.calendar.view.show_ended=!show_ended;self.calendar.view.first=0;}
         if let Some(key)=clicked{self.calendar.view.focus=Some(key);}

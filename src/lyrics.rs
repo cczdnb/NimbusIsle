@@ -275,6 +275,7 @@ pub fn fetch_for_source(source:&str,track:&str,artist:&str,duration:f64,song_id:
             let path=crate::model::config_dir().join("lyrics").join(format!("netease-{id}.lrc"));
             if let Some(lyrics)=read_cache(&path).filter(|lyrics|!romanized(track,lyrics)){trace(||"本地缓存:命中".into());return Ok(lyrics);}
             if let Some(remembered)=read_negative(&path){trace(||"近期已确认无同步歌词".into());return remembered;}
+            if track.trim().is_empty() || artist.trim().is_empty(){return Err(FetchError::IncompleteMetadata);}
             let by_id=fetch_netease_song("https://music.163.com",id);
             trace(||format!("网易云按ID:{}",outcome(&by_id)));
             match by_id{
@@ -766,6 +767,13 @@ fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    #[test]
+    fn online_song_lookup_needs_a_title_and_an_artist(){
+        assert!(matches!(fetch("晴天","",200.0),Err(FetchError::IncompleteMetadata)));
+        assert!(matches!(fetch_for_source("cloudmusic.exe","晴天","",200.0,Some(42)),Err(FetchError::IncompleteMetadata)),"缺歌手时不能按歌曲编号上网取词");
+    }
+
     #[test]
     fn radio_style_titles_are_split_and_stripped_conservatively(){
         assert_eq!(split_title_artist("晴天 - 周杰伦"),Some(("晴天".into(),"周杰伦".into())));

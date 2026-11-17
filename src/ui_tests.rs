@@ -1809,6 +1809,22 @@ fn music_uses_system_artwork_and_clears_it_when_the_next_song_has_none(){
 }
 
 #[test]
+fn lyrics_without_an_artist_do_not_start_an_online_lookup(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.opts.fetch_lyrics=true;h.app.show_lyrics=true;
+    h.media=crate::smtc::NowPlaying{source:"cloudmusic.exe".into(),title:"晴天".into(),song_id:Some(42),playing:true,duration:200.0,playback_type:crate::smtc::MediaKind::Music,..Default::default()};
+    h.frame(vec![]);
+    assert!(h.app.ly.pending.is_none() && h.app.ly.rx.is_none(),"缺歌手时不排队在线取词");
+    h.media=crate::smtc::NowPlaying{title:"片头".into(),artist:"频道".into(),playing:true,playback_type:crate::smtc::MediaKind::Video,..Default::default()};
+    h.frame(vec![]);
+    assert!(h.app.media.title.is_empty(),"视频会话不进入音乐条");
+    h.media=crate::smtc::NowPlaying{source:"cloudmusic.exe".into(),title:"晴天".into(),artist:"周杰伦".into(),playing:true,duration:200.0,playback_type:crate::smtc::MediaKind::Music,..Default::default()};
+    h.frame(vec![]);
+    assert!(h.app.ly.pending.is_some() || h.app.ly.rx.is_some() || h.app.ly.loading,"歌名和歌手都在时才开始查询");
+}
+
+#[test]
 fn failed_lyrics_can_be_retried_from_the_music_page(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
@@ -1848,10 +1864,9 @@ fn music_lyrics_show_in_a_separate_right_column() {
     h.media=crate::smtc::NowPlaying{title:"Track".into(),artist:"Artist".into(),position:7.0,duration:120.0,..Default::default()};
     h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc("[00:01]上一句\n[00:05]当前歌词\n[00:10]下一句"));
     h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);
-    let current=h.shapes.iter().find_map(|shape|match &shape.shape {
+    let current=h.shapes.iter().filter_map(|shape|match &shape.shape {
         egui::Shape::Text(text) if text.galley.text()=="当前歌词"=>Some(text.pos),_=>None,
-    }).expect("展开页应显示同步歌词");
-    assert!(current.x>=H::local(243.0,0.0).x,"歌词必须位于播放器右侧");
+    }).find(|pos| pos.x>=H::local(243.0,0.0).x).expect("展开页右侧应显示同步歌词");
     let title=h.shapes.iter().find_map(|shape|match &shape.shape {
         egui::Shape::Text(text) if text.galley.text()=="Track"=>Some(text.pos),_=>None,
     }).unwrap();
@@ -2104,17 +2119,16 @@ fn expanded_and_segmented_lyrics_share_the_early_display_time(){
     h.media=crate::smtc::NowPlaying{title:"Track".into(),artist:"Artist".into(),position:9.8,duration:120.0,playing:true,..Default::default()};
     h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc("[00:05]当前歌词\n[00:10]下一句"));
     h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);
-    let next=h.shapes.iter().find_map(|shape|match &shape.shape{egui::Shape::Text(text)if text.galley.text()=="下一句"=>Some(text),_=>None}).unwrap();
+    let next=h.shapes.iter().find_map(|shape|match &shape.shape{egui::Shape::Text(text)if text.galley.text()=="下一句"&&text.galley.job.sections[0].format.font_id.size==12.0=>Some(text),_=>None}).unwrap();
     assert_eq!(next.galley.job.sections[0].format.font_id.size,12.0,"展开歌词也应在开唱前高亮下一句");
     h.hover(Pos2::new(WIN_W/2.0,PH+30.0),1.0);
     let line="愿每一个认真生活的人，都能在平凡的日子里找到属于自己的光";
     h.media.position=6.0;h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc(&format!("[00:05]{line}\n[00:15]下一句")));
     for _ in 0..60{h.frame(vec![]);}
-    let shown=|h:&H|h.shapes.iter().find_map(|s|match &s.shape{egui::Shape::Text(t)if line.contains(t.galley.text())&&!t.galley.text().is_empty()=>Some(t.galley.text().to_owned()),_=>None}).unwrap();
-    let first=shown(&h);
-    let boundary=5.0+10.0*first.chars().count()as f64/line.chars().count()as f64;
-    h.media.position=boundary-0.2;for _ in 0..30{h.frame(vec![]);}
-    assert_ne!(shown(&h),first,"长句的后半段也应使用相同的提前量");
+    let shown=|h:&H|h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()==line));
+    assert!(shown(&h),"长句应整句进入歌词槽，不再按进度切段");
+    h.media.position=14.0;for _ in 0..30{h.frame(vec![]);}
+    assert!(shown(&h),"同一句后半段仍显示整句，由槽内横滑露出后文");
 }
 
 #[test]
@@ -2145,16 +2159,44 @@ fn island_lyrics_center_segments_in_a_fixed_height(){
             assert!(!h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="09:41")),"切换显示段时应保持歌词布局");
         }
         let text=h.shapes.iter().find_map(|shape|match &shape.shape {
-            egui::Shape::Text(text) if !text.galley.text().is_empty() && line.contains(text.galley.text())=>Some(text),_=>None,
-        }).expect("岛上应显示当前歌词的一段");
-        let center=text.pos.x+text.galley.rect.center().x;
-        let offset=if h.app.pet_enabled(){24.0}else{0.0};
-        assert!((center-WIN_W/2.0-offset).abs()<1.5,"歌词应在内容区居中");
-        assert!(!text.galley.elided,"显示段应完整显示");
-        assert_eq!(text.galley.rows.len(),1,"每次只显示一段歌词");
+            egui::Shape::Text(text) if text.galley.text()==line=>Some((text.galley.elided,text.galley.rows.len(),text.visual_bounding_rect())),_=>None,
+        }).expect("岛上应显示当前歌词整句");
+        if line.chars().count()<8 {
+            let left=text.2.left();
+            h.t+=1.5;h.frame(vec![]);
+            let again=h.shapes.iter().find_map(|shape|match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text()==line=>Some(text.visual_bounding_rect().left()),_=>None,
+            }).unwrap();
+            assert!((again-left).abs()<0.5,"短句不横向滚动");
+        }
+        assert!(!text.0,"整句应完整排版，不改成省略号");
+        assert_eq!(text.1,1,"歌词保持单行");
         assert!((h.hit.height()-(crate::app::BAR_H+4.0)).abs()<0.1,"岛应保持固定高度");
-        assert!(text.visual_bounding_rect().bottom()<=h.hit.bottom(),"文字应完整显示在岛内");
+        assert!(text.2.bottom()<=h.hit.bottom(),"文字应完整显示在岛内");
     }
+}
+
+#[test]
+fn island_lyrics_grow_taller_when_the_translation_is_shown(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();h.app.settings.island_lyrics=true;h.app.settings.lyric_translation=true;
+    h.media=crate::smtc::NowPlaying{title:"Track".into(),artist:"Artist".into(),position:7.0,duration:120.0,playing:true,..Default::default()};
+    let mut lyrics=crate::lyrics::parse_lrc("[00:05]I've had just enough time\n[00:15]下一句");
+    lyrics.enhance.lines=vec![
+        crate::lyric_enhance::LineEnhance{translation:"我已经活了足够的时间".into(),..Default::default()},
+        crate::lyric_enhance::LineEnhance::default(),
+    ];
+    h.app.set_lyrics("Track","Artist",120.0,lyrics);
+    for _ in 0..90 {h.frame(vec![]);}
+    assert!(h.hit.height()>crate::app::BAR_H+16.0,"有译文时岛上歌词应加高");
+    let trans=h.shapes.iter().find_map(|shape|match &shape.shape {
+        egui::Shape::Text(text) if text.galley.text()=="我已经活了足够的时间"=>Some(text.visual_bounding_rect()),_=>None,
+    }).expect("译文应画出来");
+    let original=h.shapes.iter().find_map(|shape|match &shape.shape {
+        egui::Shape::Text(text) if text.galley.text()=="I've had just enough time"=>Some(text.visual_bounding_rect()),_=>None,
+    }).expect("原文应画出来");
+    assert!(trans.top()>=original.bottom()-1.0,"译文应排在原文下面，不要叠在一起");
+    assert!(trans.bottom()<=h.hit.bottom()+1.0,"译文应留在岛内");
 }
 
 #[test]
@@ -2164,16 +2206,28 @@ fn island_lyric_segments_follow_playback_pause_and_seek(){
     let line="愿每一个认真生活的人，都能在平凡的日子里找到属于自己的光";
     h.media=crate::smtc::NowPlaying{title:"Track".into(),artist:"Artist".into(),position:6.0,duration:120.0,playing:true,..Default::default()};
     h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc(&format!("[00:05]{line}\n[00:15]下一句")));
-    let shown=|h:&H|h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t)=>Some(t.galley.text().to_owned()),_=>None}).unwrap();
-    for _ in 0..90 {h.frame(vec![]);}let first=shown(&h);
-    h.media.position=14.0;for _ in 0..30 {h.frame(vec![]);}let last=shown(&h);
-    assert_ne!(first,last,"播放到后半句时应切换显示段");
-    assert_eq!(format!("{first}{last}"),line,"前后显示段应覆盖完整歌词");
+    let shown=|h:&H|h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==line || t.galley.text()=="下一句"=>Some(t.galley.text().to_owned()),_=>None}).unwrap();
+    for _ in 0..90 {h.frame(vec![]);}
+    assert_eq!(shown(&h),line,"长句应整句绘制");
+    h.app.ly.marquee_line.clear();
+    h.frame(vec![]);
+    let start_x=h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==line=>Some(t.pos.x),_=>None}).unwrap();
+    h.t+=0.2;h.frame(vec![]);
+    let held=h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==line=>Some(t.pos.x),_=>None}).unwrap();
+    assert!((held-start_x).abs()<0.5,"开始滚动前应停留");
+    h.t+=2.0;h.frame(vec![]);
+    let moved=h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==line=>Some(t.pos.x),_=>None}).unwrap();
+    assert!(moved<start_x-8.0,"长句应向左滚出后文");
+    let width=h.app.current_width();
+    h.media.position=14.0;for _ in 0..30 {h.frame(vec![]);}
+    assert_eq!(shown(&h),line,"同一句后半仍是整句");
+    assert!((h.app.current_width()-width).abs()<0.6,"横滑不改变岛宽");
     h.media.playing=false;for _ in 0..120 {h.frame(vec![]);}
     assert!(h.app.island_lyric().is_none(),"暂停时应恢复常驻形态");
-    h.media.playing=true;for _ in 0..30 {h.frame(vec![]);}assert_eq!(shown(&h),last,"继续播放时应恢复对应显示段");
-    h.media.position=6.0;for _ in 0..30 {h.frame(vec![]);}assert_eq!(shown(&h),first,"拖回前半句应恢复对应显示段");
-    h.media.position=16.0;for _ in 0..30 {h.frame(vec![]);}assert_eq!(shown(&h),"下一句");
+    h.media.playing=true;for _ in 0..30 {h.frame(vec![]);}assert_eq!(shown(&h),line,"继续播放时应回到这一句");
+    h.media.position=6.0;for _ in 0..5 {h.frame(vec![]);}assert_eq!(shown(&h),line);
+    h.app.ly.marquee_line.clear();
+    h.media.position=16.0;for _ in 0..30 {h.frame(vec![]);}assert_eq!(shown(&h),"下一句","换句后显示新句，滚动从头计");
 }
 
 #[test]
@@ -4013,7 +4067,9 @@ fn page_visibility_is_saved_and_sets_the_starting_page() {
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=000000\n").unwrap();
     assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,false,false,false]);
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=1000000\n").unwrap();
-    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true],"旧版页面开关应保留，并开启新增的日程页、天气页与第三方待办页");
+    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true],"旧版页面开关应保留，并开启后来新增的页面");
+    std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=10000001110\n").unwrap();
+    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true],"撤下对话页后，第十一位开关不再保留");
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=invalid\n").unwrap();
     assert_eq!(crate::model::Settings::load().visible_pages,[true; crate::model::PAGE_COUNT]);
 }
@@ -5065,18 +5121,18 @@ fn timer_keeps_the_existing_lyric_segments_and_content_bounds(){
         h.media=crate::smtc::NowPlaying{title:"Track".into(),artist:"Artist".into(),position:6.0,duration:120.0,playing:true,..Default::default()};
         h.app.set_lyrics("Track","Artist",120.0,crate::lyrics::parse_lrc(&format!("[00:05]{line}\n[00:15]下一句")));
         let shown=|h:&H|h.shapes.iter().find_map(|s|match &s.shape {
-            egui::Shape::Text(t) if !t.galley.text().is_empty() && line.contains(t.galley.text())=>Some((t.galley.text().to_owned(),t.visual_bounding_rect(),t.galley.rows.len(),t.galley.elided)),_=>None,
+            egui::Shape::Text(t) if t.galley.text()==line=>Some((t.galley.text().to_owned(),s.clip_rect,t.galley.rows.len(),t.galley.elided)),_=>None,
         }).unwrap();
         for position in [6.0,14.0] {
             h.media.position=position;h.app.pomo.running=false;
-            for _ in 0..90 {h.frame(vec![]);}let expected=shown(&h).0;
+            for _ in 0..90 {h.frame(vec![]);}
             h.app.pomo.running=true;for _ in 0..120 {h.frame(vec![]);}
-            let (text,bounds,rows,elided)=shown(&h);assert_eq!(text,expected,"计时不应改变歌词分段");
+            let (text,clip,rows,elided)=shown(&h);assert_eq!(text,line,"计时不应把长句改成截断");
             assert_eq!(rows,1);assert!(!elided);
             let secs=h.app.pomo.remaining.ceil() as u32;let countdown=format!("{:02}:{:02}",secs/60,secs%60);
             let timer=h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==countdown=>Some(t.visual_bounding_rect()),_=>None}).unwrap();
-            assert!(bounds.right()+20.0<timer.left(),"歌词与倒计时之间应留出波形和图标的位置");
-            assert!(timer.right()<h.hit.right() && bounds.top()>=h.hit.top() && bounds.bottom()<h.hit.bottom());
+            assert!(clip.right()+8.0<=timer.left()+1.0,"歌词槽应停在倒计时左侧");
+            assert!(timer.right()<h.hit.right() && clip.top()>=h.hit.top()-1.0 && clip.bottom()<=h.hit.bottom()+1.0);
             assert!((h.app.current_width()-if pet{418.0}else{370.0}).abs()<0.1);
         }
     }
@@ -6601,7 +6657,7 @@ fn weather_resident_settings_preserve_old_orders_and_the_status_switch(){
     let path=crate::model::config_dir().join("settings.txt");std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path,"resident_order=7,6,2,0,9,1\nshow_weather=0\n").unwrap();
     h.app.settings=crate::model::Settings::load();
-    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO],"旧排列应在时钟后插入天气，并在末尾补上待办提醒槽");
+    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,crate::bar_layout::CPU,crate::bar_layout::MEM],"旧排列应在时钟后插入天气，补上待办，再把 CPU 和内存接到末尾");
     h.app.weather.snapshot=Some(crate::weather::Snapshot{temp:9.0,..Default::default()});
     assert!(h.app.weather_pill().is_none(),"状态开关关闭后天气不占常驻位置");
     assert!(h.app.module_on(8),"关闭常驻天气应保留天气页面");
@@ -6834,11 +6890,14 @@ fn page_order_persists_and_controls_navigation() {
         std::fs::write(crate::model::config_dir().join("settings.txt"),format!("page_order={invalid}\n")).unwrap();
         assert_eq!(crate::model::Settings::load().page_order,[0,1,2,3,4,5,6,7,8,9]);
     }
+    std::fs::write(crate::model::config_dir().join("settings.txt"),"page_order=5,10,2,0,1,3,4,6,7,8,9\n").unwrap();
+    assert_eq!(crate::model::Settings::load().page_order,[5,2,0,1,3,4,6,7,8,9],"已保存的对话页从顺序里去掉，其余页面保持相对位置");
 }
 
 #[test]
 fn page_order_drag_applies_on_release_and_saves() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=H::new();
+    h.app.wizard_step=None;h.app.settings.first_run_done=true;
     h.app.settings_tab=11;h.app.open_settings();h.ctx.set_embed_viewports(false);
     fn draw(h:&mut H,events:Vec<egui::Event>){
         let output=std::sync::Arc::new(Mutex::new(None));let capture=output.clone();
@@ -6852,9 +6911,15 @@ fn page_order_drag_applies_on_release_and_saves() {
         let child=output.lock().unwrap().take().unwrap();h.shapes=child.shapes;
     }
     for _ in 0..3 {draw(&mut h,vec![]);}
-    let point=|h:&H,label:&str|h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==label=>Some(t.visual_bounding_rect().left_center()),_=>None}).unwrap();
-    let from=point(&h,"播放控制与同步歌词")+egui::vec2(-18.0,-6.0);
-    let to=point(&h,"喝水与久坐提醒");
+    let point=|h:&H,label:&str|h.shapes.iter().find_map(|s|match &s.shape {egui::Shape::Text(t) if t.galley.text()==label=>Some(t.visual_bounding_rect().left_center()),_=>None});
+    for _ in 0..24 {
+        let music=point(&h,"播放控制与同步歌词");
+        let water=point(&h,"喝水与久坐提醒");
+        if matches!((music,water),(Some(a),Some(b)) if (140.0..620.0).contains(&a.y) && (140.0..620.0).contains(&b.y)) {break;}
+        draw(&mut h,vec![egui::Event::PointerMoved(egui::pos2(420.0,320.0)),egui::Event::MouseWheel{unit:egui::MouseWheelUnit::Point,delta:egui::vec2(0.0,-220.0),modifiers:Default::default()}]);
+    }
+    let from=point(&h,"播放控制与同步歌词").unwrap()+egui::vec2(-18.0,-6.0);
+    let to=point(&h,"喝水与久坐提醒").unwrap();
     let button=|pos,pressed|egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
     draw(&mut h,vec![egui::Event::PointerMoved(from),button(from,true)]);
     draw(&mut h,vec![egui::Event::PointerMoved(from+egui::vec2(0.0,10.0))]);
@@ -8116,7 +8181,7 @@ fn side_dock_stacks_ai_quota_and_opens_the_account(){
     let total=h.app.side_bar_len()-14.0;
     let mut y=top+(h.app.h.pos-total)/2.0;
     for item in h.app.side_items() {
-        let height=match item {crate::side_dock::SideItem::Quota(i,hh) if h.app.quota.config.accounts[i].id==wb=>{y+=hh/2.0;break;},crate::side_dock::SideItem::Quota(_,hh)=>hh,crate::side_dock::SideItem::Clock=>32.0,crate::side_dock::SideItem::Weather=>40.0,crate::side_dock::SideItem::Battery=>20.0,crate::side_dock::SideItem::Music=>18.0,crate::side_dock::SideItem::Focus|crate::side_dock::SideItem::Bell=>22.0,crate::side_dock::SideItem::RemoteTodo=>24.0};
+        let height=match item {crate::side_dock::SideItem::Quota(i,hh) if h.app.quota.config.accounts[i].id==wb=>{y+=hh/2.0;break;},crate::side_dock::SideItem::Quota(_,hh)=>hh,crate::side_dock::SideItem::Clock=>32.0,crate::side_dock::SideItem::Weather=>40.0,crate::side_dock::SideItem::Battery=>20.0,crate::side_dock::SideItem::Music=>18.0,crate::side_dock::SideItem::Focus|crate::side_dock::SideItem::Bell=>22.0,crate::side_dock::SideItem::Cpu|crate::side_dock::SideItem::Mem=>32.0,crate::side_dock::SideItem::RemoteTodo=>24.0};
         y+=height;
     }
     let click=Pos2::new(18.0,y);
@@ -9306,7 +9371,7 @@ fn weather_icon_atlas_preview(){
     for (name,palette,ppp) in [("weather-icons-dark",None,2.0f32),("weather-icons-cream",Some(crate::skin_paint::CREAM),2.0),("weather-icons-glass-light",Some(crate::skin_paint::GLASS_LIGHT),2.0),("weather-icons-dark-1x",None,1.0),("weather-icons-dark-125",None,1.25),("weather-icons-dark-150",None,1.5)] {
         let (pw,ph)=((924.0*ppp) as usize,(700.0*ppp) as usize);
         let mut h=H::new();h.app.settings.pet=false;
-        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false);layout.widths[crate::bar_layout::WEATHER]=50.0;
+        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false,false,false);layout.widths[crate::bar_layout::WEATHER]=50.0;
         let mut raster=crate::preview_raster::Raster::new(pw,ph);
         for frame in 0..4 {
             let raw=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(924.0,700.0))),time:Some(frame as f64),

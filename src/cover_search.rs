@@ -22,7 +22,7 @@ impl CoverSearch {
     }
 
     pub(crate) fn fill_with(&mut self,media:&NowPlaying,now:Instant,load:impl FnOnce(String,String,f64)->Found+Send+'static)->Found {
-        if media.artwork.is_some() || !media.is_music() {return None;}
+        if media.artwork.is_some() || !media.is_music() || media.artist.trim().is_empty() || media.title.trim().is_empty() {return None;}
         let key=format!("{}|{}",media.title,media.artist);
         // 换歌时丢弃旧请求，迟到的封面不能贴到新歌上。
         if key!=self.key {*self=Self{key,missing_since:Some(now),worker:self.worker.take(),..Default::default()};}
@@ -66,6 +66,7 @@ pub(crate) fn pick(songs:&[serde_json::Value],title:&str,artist:&str,duration:f6
 }
 
 fn search(title:String,artist:String,duration:f64)->Found {
+    if title.trim().is_empty() || artist.trim().is_empty() {return None;}
     let query=format!("{title} {artist}");
     let mut url=url::Url::parse("https://music.163.com/api/cloudsearch/pc").ok()?;
     url.query_pairs_mut().append_pair("s",query.trim()).append_pair("type","1").append_pair("limit","10").append_pair("offset","0");
@@ -134,5 +135,20 @@ mod tests {
         assert!(cache.fill_with(&with_cover,start,load(&calls,None)).is_none(),"播放器自己有封面时不搜");
         let next=NowPlaying{title:"七里香".into(),..media};
         assert!(cache.fill_with(&next,start+WAIT*20,load(&calls,None)).is_none(),"换歌后重新等待，旧封面不沿用");
+    }
+    #[test]
+    fn missing_artist_or_video_does_not_search_online(){
+        let calls=Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let load=|calls:&Arc<std::sync::atomic::AtomicUsize>|{let calls=calls.clone();move|_:String,_:String,_:f64|{calls.fetch_add(1,std::sync::atomic::Ordering::SeqCst);None}};
+        let mut cache=CoverSearch::default();
+        let song=NowPlaying{title:"晴天".into(),playback_type:MediaKind::Music,duration:200.0,..Default::default()};
+        assert!(cache.fill_with(&song,Instant::now()+WAIT*3,load(&calls)).is_none());
+        let video=NowPlaying{title:"片头".into(),artist:"频道".into(),playback_type:MediaKind::Video,..Default::default()};
+        assert!(cache.fill_with(&video,Instant::now()+WAIT*3,load(&calls)).is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst),0,"没有歌手或属于视频时不发起在线补封面");
+        let named=NowPlaying{title:"晴天".into(),artist:"周杰伦".into(),playback_type:MediaKind::Music,duration:200.0,..Default::default()};
+        cache.fill_with(&named,Instant::now()+WAIT,load(&calls));
+        cache.worker.take().unwrap().join().unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst),1,"歌名和歌手都在才搜索");
     }
 }

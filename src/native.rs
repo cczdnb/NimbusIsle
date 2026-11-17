@@ -227,6 +227,10 @@ unsafe extern "system" fn subclass(
     {
         return LRESULT(MA_NOACTIVATE as isize);
     }
+    if msg == WM_HOTKEY {
+        crate::hotkeys::press(wp.0 as u32);
+        return LRESULT(0);
+    }
     if msg == WM_NCHITTEST {
         let x = (lp.0 & 0xffff) as u16 as i16 as i32;
         let y = ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32;

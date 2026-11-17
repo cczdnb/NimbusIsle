@@ -29,7 +29,7 @@ mod player_seek;
 pub(crate) mod player_process;
 #[cfg(windows)]
 #[path="music_log.rs"]
-mod music_log;
+pub(crate) mod music_log;
 
 #[cfg(windows)]
 #[path="music_gaps.rs"]

@@ -21,14 +21,14 @@ pub const SIDE_HALF_EXTENT: f32 = 150.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SideItem {
-    Clock, Weather, Battery, Music, Focus, Bell, RemoteTodo,
+    Clock, Weather, Battery, Music, Focus, Bell, RemoteTodo, Cpu, Mem,
     /// AI 额度：账号下标（None 为「+N」）与高度。
     Quota(usize, f32),
 }
 
 impl SideItem {
     fn height(self, clock_seconds: bool) -> f32 {
-        match self { Self::Clock => if clock_seconds {46.0}else{32.0}, Self::Weather => 40.0, Self::Battery => 20.0, Self::Music => 18.0, Self::Focus => 22.0, Self::Bell => 22.0, Self::RemoteTodo => 24.0, Self::Quota(_, h) => h }
+        match self { Self::Clock => if clock_seconds {46.0}else{32.0}, Self::Weather => 40.0, Self::Battery => 20.0, Self::Music => 18.0, Self::Focus => 22.0, Self::Bell => 22.0, Self::RemoteTodo => 24.0, Self::Cpu | Self::Mem => 32.0, Self::Quota(_, h) => h }
     }
 }
 
@@ -47,6 +47,8 @@ impl App {
         items.extend(self.quota_side_items().into_iter().map(|(index, h)| SideItem::Quota(index, h)));
         if self.t < self.notification_bell_until { items.push(SideItem::Bell); }
         if self.nudge_icon_visible() { items.push(SideItem::RemoteTodo); }
+        if self.settings.show_cpu { items.push(SideItem::Cpu); }
+        if self.settings.show_mem { items.push(SideItem::Mem); }
         items
     }
 
@@ -157,6 +159,21 @@ impl App {
                         .clicked()
                     {
                         self.open_remote_todo_focus();
+                    }
+                }
+                SideItem::Cpu | SideItem::Mem => {
+                    let cpu = matches!(item, SideItem::Cpu);
+                    let value = crate::sys_meter::current().map(|reading| if cpu { reading.cpu } else { reading.mem }).unwrap_or(f32::NAN);
+                    let pct = if value.is_finite() { format!("{value:.0}%") } else { "—".into() };
+                    let colors = crate::sys_meter::meter_colors(crate::sys_meter::meter_band(cpu, value));
+                    c.fill(cx - 13.0, mid - 15.0, 26.0, 12.0, 3.5, colors.tag);
+                    c.text(cx, mid - 6.0, if cpu { "CPU" } else { "RAM" }, 8.0, W::Bold, theme::WHITE, H::Center);
+                    c.text(cx, mid + 7.0, &pct, 10.0, W::Semibold, theme::WHITE, H::Center);
+                    let bar = 26.0;
+                    c.fill(cx - bar / 2.0, mid + 10.0, bar, 3.0, 1.5, colors.track);
+                    if value.is_finite() {
+                        let fill = bar * (value / 100.0).clamp(0.0, 1.0);
+                        if fill > 0.8 { c.fill(cx - bar / 2.0, mid + 10.0, fill, 3.0, 1.5, colors.bar); }
                     }
                 }
             }

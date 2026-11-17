@@ -32,6 +32,79 @@ pub fn image_is(pid:u32,exe:&str)->bool {
     image_path(pid).is_some_and(|path|exe_name(&path).eq_ignore_ascii_case(exe))
 }
 
+/// 该进程可见、无宿主、不是工具窗口里面积最大的一扇，当作主窗口。
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WindowFact {
+    pub pid: u32,
+    pub visible: bool,
+    pub owned: bool,
+    pub tool: bool,
+    pub area: i64,
+}
+
+pub(crate) fn pick_main(pid: u32, windows: &[WindowFact]) -> Option<usize> {
+    windows.iter().enumerate()
+        .filter(|(_, window)| window.pid == pid && window.visible && !window.owned && !window.tool && window.area > 0)
+        .max_by_key(|(_, window)| window.area)
+        .map(|(index, _)| index)
+}
+
+/// 把播放器主窗口还原并置前。找不到可见主窗口时返回 false，由界面给出短提示。
+pub fn activate_named(exe: &str) -> bool {
+    if exe.trim().is_empty() { return false; }
+    pids_named(exe).into_iter().any(activate_pid)
+}
+
+fn activate_pid(pid: u32) -> bool {
+    let Some(window) = main_window(pid) else { return false };
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{IsIconic, SW_RESTORE, ShowWindow};
+        if IsIconic(window).as_bool() { let _ = ShowWindow(window, SW_RESTORE); }
+        force_foreground(window)
+    }
+}
+
+fn main_window(pid: u32) -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::{
+        Foundation::{BOOL, HWND, LPARAM, RECT},
+        UI::WindowsAndMessaging::{EnumWindows, GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, WS_EX_TOOLWINDOW},
+    };
+    struct Found { facts: Vec<WindowFact>, handles: Vec<HWND> }
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
+        let found = &mut *(data.0 as *mut Found);
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut owner));
+        let owned = GetWindow(hwnd, GW_OWNER).is_ok();
+        let tool = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0;
+        let mut rect = RECT::default();
+        let area = if GetWindowRect(hwnd, &mut rect).is_ok() {
+            (rect.right - rect.left).max(0) as i64 * (rect.bottom - rect.top).max(0) as i64
+        } else { 0 };
+        found.facts.push(WindowFact { pid: owner, visible: IsWindowVisible(hwnd).as_bool(), owned, tool, area });
+        found.handles.push(hwnd);
+        true.into()
+    }
+    let mut found = Found { facts: Vec::new(), handles: Vec::new() };
+    unsafe { let _ = EnumWindows(Some(visit), LPARAM(&mut found as *mut Found as isize)); }
+    let index = pick_main(pid, &found.facts)?;
+    found.handles.get(index).copied()
+}
+
+unsafe fn force_foreground(window: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::{
+        System::Threading::{AttachThreadInput, GetCurrentThreadId},
+        UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow},
+    };
+    let foreground = GetForegroundWindow();
+    let foreground_thread = GetWindowThreadProcessId(foreground, None);
+    let current = GetCurrentThreadId();
+    let attached = foreground_thread != 0 && foreground_thread != current && AttachThreadInput(current, foreground_thread, true).as_bool();
+    let _ = BringWindowToTop(window);
+    let ok = SetForegroundWindow(window).as_bool();
+    if attached { let _ = AttachThreadInput(current, foreground_thread, false); }
+    ok
+}
+
 /// 用“查询有限信息”权限读取进程的可执行文件路径；只用于核对身份和读取版本号。
 pub fn image_path(pid:u32)->Option<String> {
     if pid==0 {return None;}
@@ -49,6 +122,20 @@ pub fn image_path(pid:u32)->Option<String> {
 fn exe_name_takes_file_part(){
     assert_eq!(exe_name(r"C:\Program Files\KuGou\KuGou.exe"),"KuGou.exe");
     assert_eq!(exe_name("cloudmusic.exe"),"cloudmusic.exe");
+}
+
+#[test]
+fn largest_ownerless_window_is_the_main_one(){
+    let windows = [
+        WindowFact { pid: 7, visible: true, owned: true, tool: false, area: 900 },
+        WindowFact { pid: 7, visible: true, owned: false, tool: true, area: 800 },
+        WindowFact { pid: 7, visible: false, owned: false, tool: false, area: 700 },
+        WindowFact { pid: 7, visible: true, owned: false, tool: false, area: 400 },
+        WindowFact { pid: 7, visible: true, owned: false, tool: false, area: 650 },
+        WindowFact { pid: 9, visible: true, owned: false, tool: false, area: 2000 },
+    ];
+    assert_eq!(pick_main(7, &windows), Some(4));
+    assert_eq!(pick_main(3, &windows), None);
 }
 
 #[test]
