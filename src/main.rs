@@ -735,6 +735,9 @@ impl eframe::App for Shell {
                     }else{self.app.say("无法重新启动云屿，请从托盘退出后手动打开");}
                 }
                 Cmd::Open(p) => {if let Err(e)=open_path(&p){self.app.say(e);}},
+                Cmd::OpenSession(launch)=>{
+                    if let Err(message)=daozai::agent_session::launch(&launch){self.app.say(message);}
+                }
                 Cmd::OpenUrl(url)=>{
                     if let Some(url)=daozai::mail::web_url(&url) {
                         if open_path(std::path::Path::new(&url)).is_err(){self.app.say("无法打开默认浏览器，请检查 Windows 默认应用设置");}

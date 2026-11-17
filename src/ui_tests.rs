@@ -672,8 +672,8 @@ fn v0649_settings_and_mail_accounts_survive_upgrade(){
         crate::model::Settings::load().save();
         let saved=std::fs::read_to_string(directory.join("settings.txt")).unwrap();
         for line in legacy.lines().filter(|line|!line.starts_with("visible_pages=")&&!line.starts_with("page_order=")){assert!(saved.lines().any(|value|value==line),"升级保存不能改变旧设置：{line}");}
-        assert!(saved.lines().any(|value|value=="visible_pages=1011111111"),"旧页面开关应保留，并默认开启天气页与第三方待办页");
-        assert!(saved.lines().any(|value|value=="page_order=5,2,0,1,3,4,6,7,8,9"),"旧顺序应保留，并把天气页、第三方待办页接在最后");
+        assert!(saved.lines().any(|value|value=="visible_pages=10111111111"),"旧页面开关应保留，并默认开启后来新增的页面");
+        assert!(saved.lines().any(|value|value=="page_order=5,2,0,1,3,4,6,7,8,9,10"),"旧顺序应保留，并把后来的页面接在最后");
     }
     std::fs::write(directory.join("mail-accounts.json"),br#"[{"email":"OldUser@qq.com","provider":"qq","enabled":true},{"email":"old@icloud.com","provider":"icloud","enabled":false}]"#).unwrap();
     let accounts=crate::mail::load_accounts();
@@ -2480,6 +2480,58 @@ fn playing_music_auto_syncs_to_the_collapsed_island_without_the_lyrics_switch(){
 }
 
 #[test]
+fn paused_music_hides_the_lower_bar_and_comes_back_when_it_resumes(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.media=crate::smtc::NowPlaying{title:"晚风".into(),artist:"示例歌手".into(),playing:true,duration:120.0,..Default::default()};
+    h.app.open=false;
+    for _ in 0..90 {h.frame(vec![]);}
+    assert!(h.app.auto_now_playing());
+    assert!(h.app.current_height()>crate::app::BAR_H+20.0);
+    h.media.playing=false;
+    for _ in 0..90 {h.frame(vec![]);}
+    assert!(!h.app.auto_now_playing(),"暂停后下面的音乐条应收起");
+    assert!((h.app.current_height()-crate::app::BAR_H).abs()<2.0,"暂停后只留上面一行");
+    h.media.playing=true;
+    for _ in 0..90 {h.frame(vec![]);}
+    assert!(h.app.current_height()>crate::app::BAR_H+20.0,"继续播放后再展开下面一行");
+}
+
+#[test]
+fn playing_bar_extends_under_the_side_notice_without_widening_the_resident_row(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.settings.wechat_notifications=true;
+    h.media=crate::smtc::NowPlaying{title:"晚风".into(),artist:"示例歌手".into(),playing:true,duration:120.0,..Default::default()};
+    h.app.pending_messengers.push(crate::app::Unread::of(crate::app::Messenger::Wechat));
+    h.app.open=false;
+    for _ in 0..90 {h.frame(vec![]);}
+    assert!(h.app.playing_extra_right>20.0,"歌词条应铺到右侧通知的外沿，实际 {}",h.app.playing_extra_right);
+    assert!((h.app.current_width()-h.app.stable_island_width()).abs()<1.0,"常驻行宽度不把旁边的通知算进去");
+}
+
+#[test]
+fn session_mark_stays_clickable_beside_the_island(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.sessions.rows.push(crate::agent_session::Row{
+        id:"cursor:1".into(),source:crate::agent_session::Source::Cursor,title:"改首页".into(),
+        phase:crate::agent_session::Phase::JustFinished,step:String::new(),usage:None,project:String::new(),
+        launch:crate::agent_session::Launch::Url(String::new()),children:0,updated:1,
+    });
+    h.app.open=false;
+    for _ in 0..30 {h.frame(vec![]);}
+    assert!(h.app.resident.current().x[crate::bar_layout::SESSION].is_none(),"会话不再占常驻行");
+    let icon=Pos2::new(WIN_W/2.0+h.app.current_width()/2.0+16.0,14.0);
+    h.hover(icon,0.8);
+    assert!(!h.app.open,"停在右侧会话图标上不应展开大卡片");
+    assert_eq!(h.app.sessions.rows.len(),1);
+    h.click(icon);
+    assert_eq!(h.app.page(),crate::app::SESSION_PAGE,"点右侧图标应打开会话页");
+    assert_eq!(h.app.sessions.rows.len(),1,"点开图标只是去看列表，点某一行才消失");
+}
+
+#[test]
 fn media_bar_shows_lyrics_instead_of_the_song_title(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
@@ -3376,7 +3428,7 @@ fn minimal_hover_does_not_catch_tabs_during_collapse() {
 fn music_header_shortcut_returns_from_every_page_without_controlling_playback() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     for playing in [true,false] {
-        let mut h=H::new();h.app.settings.page_order=[5,2,0,1,3,4,6,7,8,9];
+        let mut h=H::new();h.app.settings.page_order=[5,2,0,1,3,4,6,7,8,9,10];
         h.media=crate::smtc::NowPlaying{source:"cloudmusic.exe".into(),title:"Track".into(),artist:"Artist".into(),playing,duration:120.0,..Default::default()};
         for page in 1..crate::app::PAGE_NAMES.len() {
             h.app.show_page(page);h.hover(H::local(300.0,60.0),0.8);h.cmds.clear();
@@ -3431,7 +3483,7 @@ fn wheel_navigation_reaches_every_page_in_both_directions(){
     h.app.shelf.items.clear();h.app.todos.items.clear();
     h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);
     h.hover(H::local(210.0,18.0),0.3);
-    for (delta,pages) in [(-40.0,[1,2,3,4,5,6,7,8,9,0]),(40.0,[9,8,7,6,5,4,3,2,1,0])] {
+    for (delta,pages) in [(-40.0,[1,2,3,4,5,6,7,8,9,10,0]),(40.0,[10,9,8,7,6,5,4,3,2,1,0])] {
         for page in pages {
             h.wheel(delta);
             assert_eq!(h.app.page,page,"滚轮翻页不能被空的置物架或待办卡住");
@@ -3537,7 +3589,7 @@ fn wheel_handles_small_deltas_without_skipping_pages_on_bursts(){
 #[test]
 fn navigation_wraps_between_nine_pages_and_notification_settings_remain_accessible() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=H::new();
-    h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);h.click(H::local(21.0,68.0));assert_eq!(h.app.page,9,"左翻应从首页绕到最后一页（第三方）");
+    h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);h.click(H::local(21.0,68.0));assert_eq!(h.app.page,10,"左翻应从首页绕到最后一页（会话）");
     h.hover(H::local(300.0,60.0),0.8);h.click(H::local(398.0,88.0));assert_eq!(h.app.page,0);
     h.app.open_settings_category(3);assert!(h.app.settings_open);assert_eq!(h.app.settings_tab,7);
 }
@@ -4059,17 +4111,17 @@ fn page_visibility_is_saved_and_sets_the_starting_page() {
     h.app.settings.save();
     let settings=crate::model::Settings::load();
     assert!(!settings.show_battery);
-    assert_eq!(settings.visible_pages,[false,true,true,false,true,true,true,true,true,true]);
+    assert_eq!(settings.visible_pages,[false,true,true,false,true,true,true,true,true,true,true]);
     let restarted=App::new(&h.ctx,Options{fetch_lyrics:false,pet_idle:1e9});
     assert_eq!(restarted.page(),1);
     assert_eq!(restarted.settings.visible_pages,settings.visible_pages);
     assert!(!restarted.settings.show_battery);
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=000000\n").unwrap();
-    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,false,false,false]);
+    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,false,false,false,false]);
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=1000000\n").unwrap();
-    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true],"旧版页面开关应保留，并开启后来新增的页面");
+    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true,true],"旧版页面开关应保留，并开启后来新增的页面");
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=10000001110\n").unwrap();
-    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true],"撤下对话页后，第十一位开关不再保留");
+    assert_eq!(crate::model::Settings::load().visible_pages,[true,false,false,false,false,false,false,true,true,true,false],"十一位开关里的最后一位是会话页");
     std::fs::write(crate::model::config_dir().join("settings.txt"),"visible_pages=invalid\n").unwrap();
     assert_eq!(crate::model::Settings::load().visible_pages,[true; crate::model::PAGE_COUNT]);
 }
@@ -4111,7 +4163,7 @@ fn battery_module_can_disable_only_the_power_warning() {
 fn page_visibility_skips_hidden_pages_in_every_navigation_control() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
-    for page in [1,3,4,6,7,8,9] {h.app.set_page_visible(page,false);}
+    for page in [1,3,4,6,7,8,9,10] {h.app.set_page_visible(page,false);}
     h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);
     for expected in [2,5,0] {
         h.click(H::local(398.0,68.0));
@@ -4140,7 +4192,7 @@ fn page_visibility_moves_away_from_hidden_page_and_keeps_one_page() {
     h.app.set_page_visible(4,false);
     assert_eq!(h.app.page,0);
     assert!(!h.app.is_editing());
-    for page in [0,1,3,5,6,7,8,9] {h.app.set_page_visible(page,false);}
+    for page in [0,1,3,5,6,7,8,9,10] {h.app.set_page_visible(page,false);}
     assert_eq!(h.app.page,2);
     h.app.set_page_visible(2,false);
     assert!(h.app.settings.visible_pages[2],"不能关闭最后一个页面");
@@ -6657,7 +6709,7 @@ fn weather_resident_settings_preserve_old_orders_and_the_status_switch(){
     let path=crate::model::config_dir().join("settings.txt");std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path,"resident_order=7,6,2,0,9,1\nshow_weather=0\n").unwrap();
     h.app.settings=crate::model::Settings::load();
-    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,crate::bar_layout::CPU,crate::bar_layout::MEM],"旧排列应在时钟后插入天气，补上待办，再把 CPU 和内存接到末尾");
+    assert_eq!(h.app.settings.resident_order,[FOCUS,MUSIC,QUOTA,CLOCK,WEATHER,PET,BATTERY,REMOTE_TODO,crate::bar_layout::CPU,crate::bar_layout::MEM,crate::bar_layout::SESSION],"旧排列应在时钟后插入天气，补上待办，再把 CPU、内存和会话接到末尾");
     h.app.weather.snapshot=Some(crate::weather::Snapshot{temp:9.0,..Default::default()});
     assert!(h.app.weather_pill().is_none(),"状态开关关闭后天气不占常驻位置");
     assert!(h.app.module_on(8),"关闭常驻天气应保留天气页面");
@@ -6869,13 +6921,13 @@ fn calendar_sync_result_does_not_enqueue_another_sync() {
 fn page_order_persists_and_controls_navigation() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
-    h.app.settings.page_order=[5,2,0,1,3,4,6,7,8,9];
+    h.app.settings.page_order=[5,2,0,1,3,4,6,7,8,9,10];
     h.app.settings.save();
     let settings=crate::model::Settings::load();
-    assert_eq!(settings.page_order,[5,2,0,1,3,4,6,7,8,9]);
+    assert_eq!(settings.page_order,[5,2,0,1,3,4,6,7,8,9,10]);
     let restarted=App::new(&h.ctx,Options{fetch_lyrics:false,pet_idle:1e9});
     assert_eq!(restarted.page(),5);
-    for page in [1,3,4,6,7,8,9] {h.app.set_page_visible(page,false);}
+    for page in [1,3,4,6,7,8,9,10] {h.app.set_page_visible(page,false);}
     h.hover(Pos2::new(WIN_W/2.0,12.0),1.0);
     for expected in [5,2,0] {
         h.click(H::local(398.0,68.0));
@@ -6888,10 +6940,12 @@ fn page_order_persists_and_controls_navigation() {
     assert_eq!(h.app.page,5);
     for invalid in ["0,0,1,2,3,4,5,6","8,1,2,3,4,5,6,7","0,1","invalid"] {
         std::fs::write(crate::model::config_dir().join("settings.txt"),format!("page_order={invalid}\n")).unwrap();
-        assert_eq!(crate::model::Settings::load().page_order,[0,1,2,3,4,5,6,7,8,9]);
+        assert_eq!(crate::model::Settings::load().page_order,[0,1,2,3,4,5,6,7,8,9,10]);
     }
+    std::fs::write(crate::model::config_dir().join("settings.txt"),"page_order=5,2,0,1,3,4,6,7,8,9\n").unwrap();
+    assert_eq!(crate::model::Settings::load().page_order,[5,2,0,1,3,4,6,7,8,9,10],"十页旧顺序应保留，并把会话页接在最后");
     std::fs::write(crate::model::config_dir().join("settings.txt"),"page_order=5,10,2,0,1,3,4,6,7,8,9\n").unwrap();
-    assert_eq!(crate::model::Settings::load().page_order,[5,2,0,1,3,4,6,7,8,9],"已保存的对话页从顺序里去掉，其余页面保持相对位置");
+    assert_eq!(crate::model::Settings::load().page_order,[5,10,2,0,1,3,4,6,7,8,9],"十一页顺序原样保留");
 }
 
 #[test]
@@ -6924,9 +6978,9 @@ fn page_order_drag_applies_on_release_and_saves() {
     draw(&mut h,vec![egui::Event::PointerMoved(from),button(from,true)]);
     draw(&mut h,vec![egui::Event::PointerMoved(from+egui::vec2(0.0,10.0))]);
     draw(&mut h,vec![egui::Event::PointerMoved(to)]);
-    assert_eq!(h.app.settings.page_order,[0,1,2,3,4,5,6,7,8,9]);
+    assert_eq!(h.app.settings.page_order,[0,1,2,3,4,5,6,7,8,9,10]);
     draw(&mut h,vec![button(to,false)]);
-    assert_eq!(h.app.settings.page_order,[1,2,0,3,4,5,6,7,8,9]);
+    assert_eq!(h.app.settings.page_order,[1,2,0,3,4,5,6,7,8,9,10]);
     assert_eq!(crate::model::Settings::load().page_order,h.app.settings.page_order);
 }
 
@@ -7942,7 +7996,7 @@ fn deepseek_resident_preview_does_not_overlap_icons(){
         let output=h.ctx.run(raw,|ctx|{egui::CentralPanel::default().show(ctx,|ui|{h.app.resident_order_settings(ui);});});raster.update_textures(&output.textures_delta);
         if frame==7{
             let circles:Vec<_>=output.shapes.iter().filter_map(|shape|if let egui::Shape::Circle(c)=&shape.shape{Some(c)}else{None}).collect();
-            let whale=output.shapes.iter().find_map(|shape|if let egui::Shape::Mesh(mesh)=&shape.shape{let rect=mesh.calc_bounds();((rect.width()-24.0).abs()<0.1).then_some(rect)}else{None}).expect("DeepSeek 图标");
+            let whale=output.shapes.iter().find_map(|shape|if let egui::Shape::Mesh(mesh)=&shape.shape{let rect=mesh.calc_bounds();((rect.width()-24.0).abs()<8.0).then_some(rect)}else{None}).expect("DeepSeek 图标");
             let claude=circles.iter().find(|c|c.stroke.color==egui::Color32::from_rgb(255,116,26)&&c.radius>9.0).expect("Claude 圆环");
             assert!(whale.left()>claude.center.x+claude.radius+4.0,"DeepSeek 不应覆盖前一枚图标");
             if let Some(dest)=std::env::var_os("DAOZAI_DEEPSEEK_PREVIEW_DIR"){
@@ -9371,7 +9425,7 @@ fn weather_icon_atlas_preview(){
     for (name,palette,ppp) in [("weather-icons-dark",None,2.0f32),("weather-icons-cream",Some(crate::skin_paint::CREAM),2.0),("weather-icons-glass-light",Some(crate::skin_paint::GLASS_LIGHT),2.0),("weather-icons-dark-1x",None,1.0),("weather-icons-dark-125",None,1.25),("weather-icons-dark-150",None,1.5)] {
         let (pw,ph)=((924.0*ppp) as usize,(700.0*ppp) as usize);
         let mut h=H::new();h.app.settings.pet=false;
-        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false,false,false);layout.widths[crate::bar_layout::WEATHER]=50.0;
+        let mut layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false,false,false,false);layout.widths[crate::bar_layout::WEATHER]=50.0;
         let mut raster=crate::preview_raster::Raster::new(pw,ph);
         for frame in 0..4 {
             let raw=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(924.0,700.0))),time:Some(frame as f64),
@@ -9832,7 +9886,7 @@ fn background_services_follow_the_module_switch(){
 
 #[test]
 fn every_module_settings_tab_maps_to_its_page(){
-    let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气"];
+    let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话"];
     let mut pages:Vec<_>=(0..titles.len()).filter_map(crate::extras::settings_tab_module).collect();
     for tab in 0..titles.len() {
         if let Some(page)=crate::extras::settings_tab_module(tab) {assert!(crate::app::PAGE_NAMES[page].chars().next()==titles[tab].chars().next(),"{} ↔ {}",titles[tab],crate::app::PAGE_NAMES[page]);}

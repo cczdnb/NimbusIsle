@@ -742,8 +742,12 @@ pub(crate) mod net {
 
         // 2) 网易系：LOGIN 之前先发 ID（RFC 2971）
         if account.provider.needs_id() {
+            let id = format!(
+                "A0001 ID (\"name\" \"Yunyu\" \"version\" \"{}\" \"vendor\" \"Yunyu\")\r\n",
+                env!("CARGO_PKG_VERSION")
+            );
             stream
-                .write_all(b"A0001 ID (\"name\" \"daozai\" \"version\" \"0.5.5\" \"vendor\" \"daozai\")\r\n")
+                .write_all(id.as_bytes())
                 .map_err(|e| format!("发送 ID 失败：{e}"))?;
             let _ = stream.flush();
             let mut ok = false;

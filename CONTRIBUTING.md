@@ -27,13 +27,14 @@ rustup run 1.100.0-x86_64-pc-windows-msvc cargo run --locked --bin yunyu
 | 目录／文件 | 内容 |
 | --- | --- |
 | `src/main.rs` | Windows 外壳、系统状态和后台服务 |
-| `src/app.rs`、`src/pages.rs` | 状态与主界面。页面依次是音乐、专注、健康、置物架、待办、邮箱、AI 额度、日程、天气、第三方待办 |
+| `src/app.rs`、`src/pages.rs` | 状态与主界面。页面依次是音乐、专注、健康、置物架、待办、邮箱、AI 额度、日程、天气、第三方待办、会话 |
 | `src/extras.rs` | 设置、通知队列、关于 |
 | `src/calendar.rs`、`src/calendar_ui.rs`、`src/almanac.rs` | CalDAV、月历，以及离线农历和宜忌 |
 | `src/mail.rs`、`src/mail_reader.rs` | IMAP、MIME、验证码和邮件阅读 |
 | `src/quota.rs` 及各 provider 文件 | AI 额度与连接 |
 | `src/todo_sync/` | 第三方待办同步 |
 | `src/hotkeys.rs` | 全局快捷键 |
+| `src/agent_session.rs`、`src/session_ui.rs` | 本机 Agent 会话的读取和会话页 |
 | `src/sys_meter.rs` | 常驻 CPU 与内存 |
 | `src/weather.rs`、`src/qweather.rs` | Open-Meteo 与和风天气 |
 | `src/native.rs`、`src/system.rs` | 原生窗口、输入、拖放和系统事件 |

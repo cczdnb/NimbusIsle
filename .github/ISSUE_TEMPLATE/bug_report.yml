@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: 云屿版本
-      placeholder: v0.6.39
+      placeholder: v0.0.6
     validations:
       required: true
   - type: input

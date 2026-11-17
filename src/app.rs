@@ -35,6 +35,7 @@ pub const QUOTA_PAGE: usize = 6;
 pub const CALENDAR_PAGE: usize = 7;
 pub const WEATHER_PAGE: usize = 8;
 pub const REMOTE_TODO_PAGE: usize = 9;
+pub const SESSION_PAGE: usize = 10;
 pub(crate) const WEATHER_H: f32 = 232.0;
 pub(crate) const REMOTE_TODO_H: f32 = 232.0;
 /// 粘性确认条展示时长：超时后自动收起，改由常驻栏图标承接未确认事项。
@@ -87,8 +88,8 @@ fn pill_shadow(painter:&egui::Painter,rect:Rect,radius:f32,strength:f32){
         painter.rect_filled(r,radius+grow*0.8,Color32::from_black_alpha((255.0*a*strength) as u8));
     }
 }
-pub(crate) const PAGE_NAMES: [&str; crate::model::PAGE_COUNT] = ["音乐", "专注", "健康", "置物架", "待办", "邮箱", "AI 额度", "日程", "天气", "第三方"];
-pub(crate) const PAGE_SETTINGS_TABS: [usize; crate::model::PAGE_COUNT] = [1,2,3,5,4,8,12,9,13,6];
+pub(crate) const PAGE_NAMES: [&str; crate::model::PAGE_COUNT] = ["音乐", "专注", "健康", "置物架", "待办", "邮箱", "AI 额度", "日程", "天气", "第三方", "会话"];
+pub(crate) const PAGE_SETTINGS_TABS: [usize; crate::model::PAGE_COUNT] = [1,2,3,5,4,8,12,9,13,6,14];
 
 // ---------- 动效参数 ----------
 /// 悬停意图缓冲：光标停留这么久才真正展开（期间药丸轻微胀大作为反馈），防误触。
@@ -177,8 +178,8 @@ pub use crate::messenger::{Messenger,Unread};
 pub(crate) const UNREAD_W: f32 = 40.0;
 pub(crate) const UNREAD_GAP: f32 = 8.0;
 pub(crate) const UNREAD_SLOT: f32 = 36.0;
-/// 收起时两个来源图标的间距：并排各占一格，不叠放。
-fn unread_step(_horizontal: bool) -> f32 { 22.0 }
+/// 收起时两个来源图标的间距。要给角标留出空，不能贴在一起。
+fn unread_step(_horizontal: bool) -> f32 { 34.0 }
 
 /// 交给外壳执行的副作用。
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +188,7 @@ pub enum Cmd {
     Open(PathBuf),
     ViewMessenger(Unread),
     OpenUrl(String),
+    OpenSession(crate::agent_session::Launch),
     /// 需要键盘输入：外壳应让窗口可激活并取得焦点。
     Focus,
     Reveal(PathBuf),
@@ -731,6 +733,9 @@ pub struct App {
     pub(crate) playing_show_clock: bool,
     pub(crate) playing_show_weather: bool,
     pub(crate) playing_media_w: f32,
+    /// 收起播放时，右侧或左侧通知伸出岛体的宽度。歌词条铺到这一截的外沿，常驻图标不跟着挪。
+    pub(crate) playing_extra_left: f32,
+    pub(crate) playing_extra_right: f32,
     pub(crate) reveal: f32,
     position_drag: Option<PositionDrag>,
     /// 拖动中和松手落位期间的窗口位置（未取整），落定后回到 `settings.island_offset`。
@@ -910,6 +915,7 @@ pub struct App {
     pub(crate) updates: crate::updates::State,
     pub(crate) resident: bar::Motion,
     pub(crate) resident_power: (Option<u8>,bool),
+    pub(crate) sessions: crate::agent_session::Watch,
 }
 
 impl App {
@@ -953,6 +959,8 @@ impl App {
             playing_show_clock: true,
             playing_show_weather: false,
             playing_media_w: 200.0,
+            playing_extra_left: 0.0,
+            playing_extra_right: 0.0,
             reveal: 0.0,
             position_drag: None,
             drag_glide: None,
@@ -1050,6 +1058,7 @@ impl App {
             weather_source,
             updates: crate::updates::State::load(model::config_dir().join("update-check.json")),
             resident: Default::default(), resident_power:(None,false),
+            sessions: crate::agent_session::Watch::default(),
         }
     }
 
@@ -1747,9 +1756,9 @@ impl App {
     pub(crate) fn auto_now_playing(&self)->bool {
         if self.side() || self.effective_minimal() {return false;}
         if self.island_lyrics_active() {return false;}
-        // 「岛上歌词」打开时，暂停后回到纯常驻；媒体条只在未开歌词岛时出现在原行下方。
+        // 「岛上歌词」打开时，暂停后回到纯常驻；媒体条只在未开歌词岛、并且正在播放时出现在原行下方。
         if self.settings.island_lyrics && self.settings.visible_pages[0] {return false;}
-        self.media.is_music()
+        self.media.is_music() && self.media.playing
     }
     pub(crate) fn compact_notices(&self)->bool {self.island_lyrics_active()&&!self.open&&!self.notice.as_ref().is_some_and(|a|a.meeting.is_some()||self.settings.notification_preview&&matches!(a.source,crate::extras::AlertSource::External(_)))}
 
@@ -1937,6 +1946,42 @@ impl App {
             self.open_remote_todo_focus();
         }
     }
+
+    pub(crate) fn session_mark_visible(&self) -> bool {
+        self.module_on(SESSION_PAGE) && !self.sessions.rows.is_empty()
+    }
+
+    fn session_tick(&mut self) {
+        let notices = self.sessions.poll(self.t, self.settings.session_keep_mins, self.settings.session_sources, self.module_on(SESSION_PAGE));
+        for (phase, source, title) in notices {
+            self.alert(phase.label(), format!("{source} · {title}"), SESSION_PAGE, false);
+        }
+    }
+
+    pub(crate) fn draw_session_mark(&self, c: &Card, x: f32, y: f32, badge: bool) {
+        if let Some(source) = self.sessions.rows.first().map(|row| row.source) {
+            crate::session_ui::source_icon(c, source, x, y, 16.0);
+        } else {
+            c.circle(x, y, 7.0, Color32::from_rgb(88, 96, 112));
+            c.circle(x - 2.2, y - 0.4, 1.3, theme::WHITE);
+            c.circle(x + 2.2, y - 0.4, 1.3, theme::WHITE);
+        }
+        if badge {
+            let count = self.sessions.rows.len().min(9);
+            c.circle(x + 7.0, y - 7.0, 6.0, Color32::from_rgb(255, 72, 72));
+            c.text(x + 7.0, y - 3.5, &count.to_string(), 8.0, W::Bold, theme::WHITE, H::Center);
+        }
+    }
+
+    fn session_stack_tip(&self) -> String {
+        let count = self.sessions.rows.len();
+        if count == 1 {
+            let row = &self.sessions.rows[0];
+            format!("{} · {}", row.source.name(), if row.step.is_empty() { row.phase.label().to_string() } else { row.step.clone() })
+        } else {
+            format!("{count} 个会话")
+        }
+    }
     fn nudge_size(&self) -> (f32, f32) {
         let n = self.todo_sync.pending_nudges().len().min(3);
         let extra = if self.todo_sync.pending_nudges().len() > 3 { 14.0 } else { 0.0 };
@@ -1984,7 +2029,7 @@ impl App {
     }
 
     pub(crate) fn expanded_height(&self)->f32 {
-        if self.page==CALENDAR_PAGE {CALENDAR_H}else if self.page==WEATHER_PAGE {WEATHER_H}else if self.page==REMOTE_TODO_PAGE {REMOTE_TODO_H}else if self.page==6{176.0}else if self.page==5&&self.mail.open_uid.is_some(){236.0}else{PH}
+        if self.page==CALENDAR_PAGE {CALENDAR_H}else if self.page==WEATHER_PAGE {WEATHER_H}else if self.page==REMOTE_TODO_PAGE {REMOTE_TODO_H}else if self.page==SESSION_PAGE {WEATHER_H}else if self.page==6{176.0}else if self.page==5&&self.mail.open_uid.is_some(){236.0}else{PH}
     }
 
     // ---------------------------------------------------------------
@@ -2003,6 +2048,7 @@ impl App {
         self.fullscreen_hidden=env.fullscreen_hidden;
         self.quota_tick();
         self.weather_tick();
+        self.session_tick();
         self.current_hour=env.hour();
         self.system_idle=env.idle_seconds;
         self.dt = dt;
@@ -2046,7 +2092,8 @@ impl App {
         let bell=self.t<self.notification_bell_until&&!self.compact_notices();
         self.resident_power=(env.battery,env.charging);
         let show_music_slot=self.media.is_music()&&!bell&&!self.auto_now_playing();
-        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem);
+        // 会话不占常驻行，挂在右侧通知上，避免把顶行撑宽后歌词对不齐。
+        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem,false);
         layout.reorder(&self.settings.resident_order);
         for (position,extra) in self.quota_balance_layout(&ctx){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
@@ -2114,12 +2161,16 @@ impl App {
         let hit = if side {self.side_hit_rect(win,p_prev)} else {self.hit_rect(cx, top, p_prev)};
         let previous_menu=self.shelf_menu_rect.take();
         let inside = env.cursor.is_some_and(|c| hit.contains(c) || previous_menu.is_some_and(|r|r.contains(c)));
+        // 收起时右侧通知自己接收点击。光标停在上面不开始展开，避免图标淡掉后点不中。
+        let stack_now=self.messenger_badge_rect(win,self.island_rect(win,self.w.pos,self.h.pos)).filter(|_|self.messenger_appear()<0.02);
+        let on_stack=env.cursor.is_some_and(|c|stack_now.is_some_and(|r|r.contains(c)));
+        let inside=inside && !on_stack;
         let on_notice=env.cursor.is_some_and(|c|self.messenger_badge_rect(win,self.island_rect(win,self.w.pos,self.h.pos)).is_some_and(|r|r.contains(c)) || self.notice_rect(cx,top).is_some_and(|r|r.contains(c))||self.notice_details_rect(cx,top).is_some_and(|r|r.contains(c)));
         if !inside {
             self.hover_lock = false;
         }
         if env.cursor != self.last_cursor || ctx.input(|i| !i.events.is_empty()) {
-            if inside || hovering_files || ctx.input(|i| !i.events.is_empty()) {
+            if inside || on_stack || hovering_files || ctx.input(|i| !i.events.is_empty()) {
                 self.last_input = env.t;
             }
             self.last_cursor = env.cursor;
@@ -2152,11 +2203,14 @@ impl App {
                         let next=self.wheel_delta<0.0;
                         self.wheel_delta=0.0;
                         let calendar_max=if self.page==CALENDAR_PAGE {self.calendar_scroll_max(env)}else{0};
+                        let session_max=if self.page==SESSION_PAGE {self.session_scroll_max()}else{0};
                         let calendar_body=self.page==CALENDAR_PAGE && Rect::from_min_max(Pos2::new(163.0,52.0),Pos2::new(378.0,208.0)).contains(cursor);
                         let clipboard_tab=self.page==3 && self.shelf_tab==1;
                         let clipboard_body=clipboard_tab && Rect::from_min_max(Pos2::new(42.0,31.0),Pos2::new(377.0,124.0)).contains(cursor);
                         let list=match self.page {
                             CALENDAR_PAGE if calendar_body=>Some((&mut self.calendar.view.first,calendar_max)),
+                            SESSION_PAGE if Rect::from_min_max(Pos2::new(12.0,40.0),Pos2::new(407.0,214.0)).contains(cursor)
+                                =>Some((&mut self.sessions.first,session_max)),
                             4 if Rect::from_min_max(Pos2::new(196.0,31.0),Pos2::new(377.0,124.0)).contains(cursor)
                                 =>Some((&mut self.todo_first,self.todos.items.len().saturating_sub(3))),
                             3 if clipboard_body
@@ -2201,6 +2255,14 @@ impl App {
         let notice_rect=self.notice_rect(cx,top);
         let notice_shape=notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max));
         let body=messenger_rect.filter(|_|outside_badge.is_none()).map_or(panel,|badge|panel.union(badge));
+        self.playing_extra_left=0.0;
+        self.playing_extra_right=0.0;
+        if self.auto_now_playing() && outside_badge.is_none() {
+            if let Some(badge)=messenger_rect {
+                if badge.left()>=panel.right()-1.0 {self.playing_extra_right=(badge.right()-panel.right()).max(0.0);}
+                else if badge.right()<=panel.left()+1.0 {self.playing_extra_left=(panel.left()-badge.left()).max(0.0);}
+            }
+        }
         let body=notice_shape.map_or(body,|notice|body.union(notice));
         let minimal_pill = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until && pc < 0.02;
         let flare = if minimal_pill || pill { 0.0 } else { lerp(5.0, FLARE, pc) };
@@ -2266,7 +2328,8 @@ impl App {
         let reveal = if self.open { smoothstep(0.50, 0.97, p) } else { smoothstep(0.55, 0.92, p) };
         self.reveal = reveal;
         let origin = self.content_origin(win);
-        let clip = panel.intersect(win);
+        // 播放时歌词要画到右侧通知下面，裁剪不能停在岛体本宽。
+        let clip = if self.auto_now_playing() && !side {body.intersect(win)} else {panel.intersect(win)};
         let base = Card::new(ui, origin, clip);
         self.cursor_local = env.cursor.map(|p| base.to_local(p));
 
@@ -2388,6 +2451,7 @@ impl App {
         if self.drag_lift.pos.abs()>0.005 || self.drag_stretch.pos.abs()>0.001 {region=region.union(panel.expand2(Vec2::new(18.0,22.0)));}
         if let Some(r)=center_guide {region=region.union(r);}
         if let Some(r)=messenger_rect{region=region.union(r.expand(5.0));}
+        if self.auto_now_playing() && !side {region=region.union(body.expand(4.0));}
         if let Some(rect)=notice_shape {region=region.union(rect.expand2(Vec2::new(12.0,8.0)));}
         if let Some(rect)=notice_details {region=region.union(rect.expand(12.0));}
         // 胶囊上方留空的那一小条也要在窗口区域内，阴影才不会被截断。
@@ -2455,7 +2519,11 @@ impl App {
         FrameOut {
             region: rel(floating_toast.into_iter().chain(self.shelf_menu_rect.map(|r|r.union(r + ctx.style().visuals.popup_shadow.margin()).expand(1.0 / ctx.pixels_per_point()))).fold(region,Rect::union).intersect(ui.max_rect())),
             glass: glass_region,
-            hit: rel(if side {self.side_hit_rect(win,self.progress())} else {self.hit_rect(cx, top, self.progress())}),
+            hit: rel({
+                let hit=if side {self.side_hit_rect(win,self.progress())} else {self.hit_rect(cx, top, self.progress())};
+                let under=messenger_rect.filter(|_|outside_badge.is_none() && self.auto_now_playing() && !side).map(|badge|Rect::from_min_max(Pos2::new(badge.left(),panel.top()+BAR_H),Pos2::new(badge.right(),panel.bottom())));
+                under.map_or(hit,|under|hit.union(under))
+            }),
             notice_hit:notice_shape.into_iter().chain(notice_details).chain(messenger_rect).chain(self.shelf_menu_rect).reduce(|a,b|a.union(b)).map(rel),
             file_drop_zone:self.settings.visible_pages[3].then(||rel(if side {self.island_rect(win,PW,self.expanded_height())} else {Rect::from_min_size(Pos2::new(cx-PW/2.0,top),Vec2::new(PW,96.0))})),
             expanded: self.open,
@@ -2517,7 +2585,7 @@ impl App {
     fn unread_slot(&self,height:f32)->f32 {
         if self.unread_count()>=3 {(height-4.0)/3.0} else {UNREAD_SLOT}
     }
-    fn unread_count(&self)->usize {self.pending_messengers.len()+self.health_badges().len()}
+    fn unread_count(&self)->usize {self.pending_messengers.len()+self.health_badges().len()+usize::from(self.session_mark_visible())}
     /// 收起时叠放的来源图标，每个客户端各占一个。
     fn unread_sources(&self)->Vec<Messenger>{
         let mut sources=Vec::new();
@@ -2526,14 +2594,16 @@ impl App {
     }
     /// 收起时叠放区沿胶囊方向的长度。
     fn unread_stack_len(&self,horizontal:bool)->f32 {
-        let icons=(self.unread_sources().len()+self.health_badges().len()) as f32;
-        32.0+unread_step(horizontal)*(icons-1.0)
+        let icons=(self.unread_sources().len()+self.health_badges().len()+usize::from(self.session_mark_visible())) as f32;
+        // 会话数量角标伸到图标右上角，末尾再留一点，避免贴着胶囊边。
+        let end=if self.session_mark_visible(){8.0}else{0.0};
+        32.0+unread_step(horizontal)*(icons-1.0)+end
     }
 
     fn messenger_badge_rect(&self,win:Rect,panel:Rect)->Option<Rect>{
         if self.unread_count()==0 || self.browser_minimal_active && !self.open {return None;}
         // 完整横幅已包含该来源图标。歌词模式和横幅收起后使用常驻入口。
-        if !self.open && !self.compact_notices() && self.pending_messengers.len()==1 && self.health_badges().is_empty()
+        if !self.open && !self.compact_notices() && self.pending_messengers.len()==1 && self.health_badges().is_empty() && !self.session_mark_visible()
             && self.notice.as_ref().and_then(|a|a.messenger())==self.pending_messengers.first().map(|u|u.source){return None;}
         let bounds=self.screen.map_or(win,|screen|screen.intersect(win));
         let appear=self.messenger_appear();
@@ -2605,6 +2675,15 @@ impl App {
             let button=crate::quota_ui::bar_tooltip(inner.hit(0.0,cy-slot/2.0,UNREAD_W,slot,kind.id().to_string()),format!("{} · 点击确认，重新计时",kind.label()));
             if button.clicked(){self.confirm_health_reminder(kind);}
         }
+        if self.session_mark_visible() {
+            let index=self.pending_messengers.len()+self.health_badges().len();
+            let cy=2.0+slot*(index as f32+0.5)-self.messenger_scroll;
+            if cy>=-slot && cy<=height+slot {
+                self.draw_session_mark(&inner,x,cy,true);
+                let button=crate::quota_ui::bar_tooltip(inner.hit(0.0,cy-slot/2.0,UNREAD_W,slot,"session-capsule"),self.session_stack_tip());
+                if button.clicked(){self.open_session_page();}
+            }
+        }
         if max_scroll>0.0 {
             // 还有没露出的图标：上下边缘各一条淡淡的指示。
             let ink=paint::alpha(theme::WHITE,0.35);
@@ -2618,7 +2697,9 @@ impl App {
         let sources=self.unread_sources();
         let health=self.health_badges();
         let count=self.pending_messengers.len();
-        let icons=sources.len()+health.len();
+        let session=self.session_mark_visible();
+        let notice_icons=sources.len()+health.len();
+        let icons=notice_icons+usize::from(session);
         let step=unread_step(horizontal);
         let at=|k:usize|if horizontal {(16.0+step*k as f32,14.0)}else{(16.0,14.0+step*k as f32)};
         for k in 0..sources.len() {
@@ -2627,10 +2708,14 @@ impl App {
             crate::extras::messenger_icon(&c.scaled(x,y,scale),x,y,sources[k]);
         }
         for (i,kind) in health.iter().enumerate(){let (x,y)=at(sources.len()+i);kind.icon(c,x,y,0.7);}
-        // 每个来源图标右上角一个小红点，不显示数字。
-        for k in 0..icons {let (x,y)=at(k);c.circle(x+8.0,y-7.0,2.6,Color32::from_rgb(255,59,48));}
+        if session {
+            let (x,y)=at(notice_icons);
+            self.draw_session_mark(c,x,y,true);
+        }
+        // 每个来源图标右上角一个小红点，不显示数字。会话用自己的数量。
+        for k in 0..notice_icons {let (x,y)=at(k);c.circle(x+8.0,y-7.0,2.6,Color32::from_rgb(255,59,48));}
         let length=self.unread_stack_len(horizontal);
-        let messenger_length=if health.is_empty(){length}else{sources.len() as f32*step+if horizontal{5.0}else{3.0}};
+        let messenger_length=if health.is_empty() && !session {length}else{sources.len() as f32*step+if sources.is_empty(){0.0}else if horizontal{5.0}else{3.0}};
         let (w,h)=if horizontal {(messenger_length,BAR_H)}else{(32.0,messenger_length)};
         if count==1 {
             let u=self.pending_messengers[0];
@@ -2647,6 +2732,13 @@ impl App {
             let end=if k+1==icons{length}else{(if horizontal{x}else{y})+step/2.0};
             let button=if horizontal{c.hit(start,0.0,end-start,BAR_H,kind.id().to_string())}else{c.hit(0.0,start,32.0,end-start,kind.id().to_string())};
             if crate::quota_ui::bar_tooltip(button,format!("{} · 点击确认，重新计时",kind.label())).clicked(){self.confirm_health_reminder(kind);}
+        }
+        if session {
+            let k=notice_icons;
+            let (x,y)=at(k);
+            let start=if k==0{0.0}else{(if horizontal{x}else{y})-step/2.0};
+            let button=if horizontal{c.hit(start,0.0,length-start,BAR_H,"session-stack")}else{c.hit(0.0,start,32.0,length-start,"session-stack")};
+            if crate::quota_ui::bar_tooltip(button,self.session_stack_tip()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked(){self.open_session_page();}
         }
     }
     /// 展开面板，让旁边的未读胶囊露出来。
@@ -3112,11 +3204,13 @@ impl App {
     fn paint_playing_bar(&mut self, c: &Card, local_cx: f32, env: &Env) {
         use crate::media_inline::{self, PAD, InlineAction};
         let row_h = self.playing_bar_height.max(MEDIA_ROW_H);
-        let width = self.playing_bar_width.min(self.w.pos.max(80.0)).min(WIN_W - 32.0);
-        let left = local_cx - width / 2.0;
+        let mut width = self.playing_bar_width.min(self.w.pos.max(80.0)).min(WIN_W - 32.0);
+        let mut left = local_cx - width / 2.0;
+        left -= self.playing_extra_left;
+        width += self.playing_extra_left + self.playing_extra_right;
         let clip = c.clipped(left, -2.0, width, row_h + 4.0);
         let media_left = left + PAD;
-        let anchor_right = (media_left + self.playing_media_w + 18.0).min(left + width - 4.0).max(media_left + 80.0);
+        let anchor_right = (left + width - 4.0).max(media_left + 80.0);
         let bar = c.rect(left, 0.0, width, row_h);
         if self.settings.cover_tint {
             if let Some((image, _)) = &self.music_artwork {
@@ -3515,6 +3609,7 @@ impl App {
             6 => ("AI", "额度", theme::SOFT_GREEN),
             8 if self.weather.solar_open => ("日出", "日落", theme::YELLOW),
             8 => ("当地", "天气", theme::CYAN),
+            SESSION_PAGE => ("会话", "", theme::CYAN),
             _ => ("云屿", "设置", theme::WHITE),
         };
         let wa = c.text(15.0, base, a, size::TITLE, W::Bold, theme::WHITE, H::Left);
@@ -3526,7 +3621,7 @@ impl App {
     fn nav(&mut self, c: &Card) {
         let pages: Vec<_>=self.settings.page_order.iter().copied().filter(|page|self.settings.visible_pages[*page]).collect();
         if pages.len()<2 { return; }
-        let arrow_y=if self.page==6||self.page==8||self.page==REMOTE_TODO_PAGE{88.0}else{68.0};
+        let arrow_y=if self.page==6||self.page==8||self.page==REMOTE_TODO_PAGE||self.page==SESSION_PAGE{88.0}else{68.0};
         let l = c.hit(8.0, arrow_y-13.0, 26.0, 26.0, "nav-l");
         let r = c.hit(385.0, arrow_y-13.0, 26.0, 26.0, "nav-r");
         let (lh, lp) = c.hover_t(&l);
@@ -3575,6 +3670,7 @@ impl App {
             6 => self.page_quota(c),
             8 => self.page_weather(c,env,cmds),
             CALENDAR_PAGE => self.page_calendar(c,env),
+            SESSION_PAGE => self.page_sessions(c,cmds),
             _ => self.page_settings(c),
         }
     }

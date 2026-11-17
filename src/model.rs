@@ -229,8 +229,8 @@ pub const ISLAND_WIDTH_STEP: u32 = 8;
 pub const ISLAND_WIDTH_DEFAULT: u32 = 0;
 /// 水平位置：-100 = 最左，0 = 居中，100 = 最右（按可移动范围的百分比）。
 pub const ISLAND_OFFSET_MAX: i32 = 100;
-/// 岛上功能页面数量（含第三方待办页）。
-pub const PAGE_COUNT: usize = 10;
+/// 岛上功能页面数量（含第三方待办页和会话页）。
+pub const PAGE_COUNT: usize = 11;
 
 pub fn island_size_value(value: u32) -> u32 {
     let value = value.clamp(ISLAND_SIZE_MIN, ISLAND_SIZE_MAX);
@@ -409,11 +409,15 @@ pub struct Settings {
     pub render_compat_reason: String,
     /// 没有设置文件时为假，用来打开首次引导。文件里没有这个键时视为已经用过。
     pub first_run_done: bool,
+    /// 刚跑完的会话再留几分钟。报错不看这个时间。
+    pub session_keep_mins: u32,
+    /// 会话读取器开关，每一位对应 `agent_session::Source`。
+    pub session_sources: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9], show_clock: true, show_battery: true, show_weather: true, show_cpu: false, show_mem: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9,10], show_clock: true, show_battery: true, show_weather: true, show_cpu: false, show_mem: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false, session_keep_mins: 10, session_sources: crate::agent_session::Source::ALL_BITS }
     }
 }
 
@@ -504,15 +508,18 @@ impl Settings {
                         order.push(crate::bar_layout::CPU);
                         order.push(crate::bar_layout::MEM);
                     }
+                    if order.len()==10 && !order.contains(&crate::bar_layout::SESSION) {
+                        order.push(crate::bar_layout::SESSION);
+                    }
                     if crate::bar_layout::valid_order(&order){s.resident_order=order;}
                 }
                 "page_order" => {
                     if let Ok(order)=v.split(',').map(str::parse::<usize>).collect::<Result<Vec<_>,_>>() {
-                        let order=if order.len()==11 && (0..11).all(|page|order.contains(&page)) {
-                            order.into_iter().filter(|page|*page<PAGE_COUNT).collect::<Vec<_>>()
-                        } else { order };
                         if order.len()==PAGE_COUNT && (0..PAGE_COUNT).all(|page|order.contains(&page)) {
                             s.page_order.copy_from_slice(&order);
+                        } else if order.len()==10 && (0..10).all(|page|order.contains(&page)) {
+                            s.page_order[..10].copy_from_slice(&order);
+                            s.page_order[10]=10;
                         } else if order.len()==9 && (0..9).all(|page|order.contains(&page)) {
                             s.page_order[..9].copy_from_slice(&order);
                             s.page_order[9]=9;
@@ -532,7 +539,7 @@ impl Settings {
                 "show_cpu" => s.show_cpu = v == "1",
                 "show_mem" => s.show_mem = v == "1",
                 "notification_dwell_secs" => s.notification_dwell_secs = v.parse::<f32>().unwrap_or(4.5).clamp(2.0, 10.0),
-                "visible_pages" if (6..=11).contains(&v.len()) && v.bytes().all(|b| b==b'0' || b==b'1') => {
+                "visible_pages" if (6..=PAGE_COUNT).contains(&v.len()) && v.bytes().all(|b| b==b'0' || b==b'1') => {
                     for (enabled,value) in s.visible_pages.iter_mut().zip(v.bytes()) { *enabled=value==b'1'; }
                     if v.len()<PAGE_COUNT {
                         for enabled in &mut s.visible_pages[v.len()..]{*enabled=v.bytes().any(|b|b==b'1');}
@@ -597,6 +604,8 @@ impl Settings {
                 "render_compat" => s.render_compat = v == "1",
                 "render_compat_reason" => s.render_compat_reason = v.chars().filter(|c| !c.is_control()).take(200).collect(),
                 "first_run_done" => { saw_first_run = true; s.first_run_done = v == "1"; }
+                "session_keep_mins" => s.session_keep_mins = v.parse::<u32>().unwrap_or(10).clamp(1, 60),
+                "session_sources" => s.session_sources = v.parse::<u8>().unwrap_or(crate::agent_session::Source::ALL_BITS) & crate::agent_session::Source::ALL_BITS,
                 _ => {}
             }
         }
@@ -697,6 +706,8 @@ impl Settings {
                 ("render_compat".into(), (self.render_compat as u8).to_string()),
                 ("render_compat_reason".into(), self.render_compat_reason.clone()),
                 ("first_run_done".into(), (self.first_run_done as u8).to_string()),
+                ("session_keep_mins".into(), self.session_keep_mins.clamp(1, 60).to_string()),
+                ("session_sources".into(), (self.session_sources & crate::agent_session::Source::ALL_BITS).to_string()),
             ],
         );
     }

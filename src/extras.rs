@@ -1,6 +1,6 @@
 //! 设置、通知队列与云屿表情。
 use crate::settings_theme::color as settings_color;
-use crate::app::{App, Cmd, Env, Phase, HUD_TRACK_W, HUD_TRACK_X, HUD_W, PAGE_NAMES};
+use crate::app::{App, Cmd, Env, Phase, HUD_TRACK_W, HUD_TRACK_X, HUD_W, PAGE_NAMES, SESSION_PAGE};
 use crate::paint::{Card, H};
 use crate::theme::{self, size, W};
 use eframe::egui::{self, Color32, Rect};
@@ -553,7 +553,7 @@ impl App {
             }else{
                 let label=if is_focus{"开始"}else if is_power{"知道了"}else{"查看"};
                 if notice_button(&nc,257.0,12.0,60.0,label,"notice-action"){
-                    self.notice=None;if is_power{return;}if is_focus{self.pomo.running=true;}else if a.page<6{
+                    self.notice=None;if is_power{return;}if is_focus{self.pomo.running=true;}else if a.page<6 || a.page==SESSION_PAGE{
                         self.show_page(a.page);
                         if a.page==4 {
                             let order=self.todos.display_order(&self.today);
@@ -1173,7 +1173,7 @@ pub(crate) fn settings_card(ui:&mut egui::Ui,add:impl FnOnce(&mut egui::Ui)) {
 /// 设置分页对应的功能模块（页面序号）；常规、通知、关于、页面管理不属于任何模块。
 pub(crate) fn settings_tab_module(tab:usize)->Option<usize>{
     use crate::app::*;
-    match tab {1=>Some(MUSIC_PAGE),2=>Some(FOCUS_PAGE),3=>Some(WATER_PAGE),4=>Some(TODO_PAGE),5=>Some(SHELF_PAGE),6=>Some(REMOTE_TODO_PAGE),8=>Some(MAIL_PAGE),9=>Some(CALENDAR_PAGE),12=>Some(QUOTA_PAGE),13=>Some(WEATHER_PAGE),_=>None}
+    match tab {1=>Some(MUSIC_PAGE),2=>Some(FOCUS_PAGE),3=>Some(WATER_PAGE),4=>Some(TODO_PAGE),5=>Some(SHELF_PAGE),6=>Some(REMOTE_TODO_PAGE),8=>Some(MAIL_PAGE),9=>Some(CALENDAR_PAGE),12=>Some(QUOTA_PAGE),13=>Some(WEATHER_PAGE),14=>Some(SESSION_PAGE),_=>None}
 }
 
 pub(crate) fn settings_label(ui:&mut egui::Ui,text:&str){
@@ -1299,9 +1299,9 @@ fn setting_choices(ui:&mut egui::Ui,title:&str,value:&mut u32,values:[u32;3],uni
     let options:Vec<(u32,&str)>=values.iter().zip(labels.iter()).map(|(v,l)|(*v,l.as_str())).collect();
     settings_control_row_right(ui,title,|ui|{settings_segmented(ui,value,&options,62.0);});
 }
-const SETTINGS_GROUPS: [(&str,usize,usize);9] = [
+const SETTINGS_GROUPS: [(&str,usize,usize);10] = [
     ("常规",0,0), ("页面管理",11,11), ("音乐与歌词",1,1), ("专注与饮水",2,3),
-    ("待办与置物",4,6), ("通知、邮箱与日程",7,9), ("AI 额度",12,12), ("天气",13,13), ("关于",10,10),
+    ("待办与置物",4,6), ("通知、邮箱与日程",7,9), ("AI 额度",12,12), ("会话",14,14), ("天气",13,13), ("关于",10,10),
 ];
 
 impl App {
@@ -1384,9 +1384,9 @@ impl App {
                     }
                 }
                 ui.visuals_mut().selection.bg_fill=settings_color(ctx,Color32::from_rgb(45,105,165),Color32::from_rgb(209,226,248));
-                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气"];
+                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话"];
                 if let Some(step)=self.wizard_step { self.settings_tab=[0,11,1,6][step as usize % 4]; }
-                ui.label(egui::RichText::new(titles[self.settings_tab.min(13)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
+                ui.label(egui::RichText::new(titles[self.settings_tab.min(titles.len()-1)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
                 if let Some((_,start,end))=SETTINGS_GROUPS.iter().find(|(_,start,end)|(*start..=*end).contains(&self.settings_tab)) {
                     if start!=end {
                         ui.add_space(7.0);
@@ -1435,6 +1435,7 @@ impl App {
                         if !self.module_on(page) {ui.disable();}
                     }
                     match self.settings_tab {
+                    14=>self.session_settings(ui),
                     13=>self.weather_settings(ui),
                     12=>self.quota_settings(ui),
                     11=>{
@@ -1459,7 +1460,7 @@ impl App {
                         });
                         settings_label(ui,"功能页面");
                         settings_card(ui,|ui|{
-                            let descriptions=["播放控制与同步歌词","番茄钟与休息计时","喝水与久坐提醒","临时收纳文件位置","任务清单与到期提醒","邮件摘要与验证码","Agent 剩余额度和账号切换","月历、邮件邀请与工作日程","当地天气与七日预报","Jira 等第三方指派事项与到期提醒"];
+                            let descriptions=["播放控制与同步歌词","番茄钟与休息计时","喝水与久坐提醒","临时收纳文件位置","任务清单与到期提醒","邮件摘要与验证码","Agent 剩余额度和账号切换","月历、邮件邀请与工作日程","当地天气与七日预报","Jira 等第三方指派事项与到期提醒","正在跑、等你处理和刚完成的 Agent 会话"];
                             ui.label(egui::RichText::new("拖动左侧手柄调整顺序；关闭的功能不在后台运行，不同步也不提醒，已有数据保留。").size(11.5).color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(75))));
                             #[derive(Clone)]
                             struct PageDrag(usize);

@@ -52,6 +52,8 @@ mod weather_source_ui;
 mod qweather;
 mod pages;
 mod extras;
+pub mod agent_session;
+mod session_ui;
 mod pet;
 mod pet_expressions;
 mod bar_layout;
