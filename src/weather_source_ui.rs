@@ -420,7 +420,7 @@ impl App {
 
     pub(crate) fn weather_tutorial_ui(&mut self,ctx:&egui::Context){
         if !self.weather_source.tutorial_open{self.weather_source.tutorial_textures.clear();return;}
-        let id=egui::ViewportId::from_hash_of("daozai-weather-tutorial");
+        let id=egui::ViewportId::from_hash_of("yunyu-weather-tutorial");
         ctx.show_viewport_immediate(id,egui::ViewportBuilder::default().with_title("和风天气配置教程 · 云屿")
             .with_icon(crate::theme::app_icon()).with_inner_size([820.0,680.0]).with_min_inner_size([520.0,420.0]),|ctx,_|{
             if ctx.input(|i|i.viewport().close_requested()){self.weather_source.tutorial_open=false;}
@@ -439,7 +439,7 @@ impl App {
                 settings_hint(ui,"教程可离线连续滚动查看，支持适应宽度与放大。");
                 ui.add_space(8.0);
                 if self.weather_source.tutorial_textures.is_empty(){
-                    for (index,bytes) in [include_bytes!("../assets/weather/qweather-01-project.png").as_slice(),include_bytes!("../assets/weather/qweather-02-api-key.png").as_slice(),include_bytes!("../assets/weather/qweather-03-daozai.png").as_slice()].into_iter().enumerate(){
+                    for (index,bytes) in [include_bytes!("../assets/weather/qweather-01-project.png").as_slice(),include_bytes!("../assets/weather/qweather-02-api-key.png").as_slice(),include_bytes!("../assets/weather/qweather-03-yunyu.png").as_slice()].into_iter().enumerate(){
                         let image=image::load_from_memory(bytes).expect("内置天气教程有效").to_rgba8();
                         if index==2{self.weather_source.tutorial_step10=self.weather_source.tutorial_textures.len();}
                         // 第 10 步使用下方的云屿界面及最终操作说明。

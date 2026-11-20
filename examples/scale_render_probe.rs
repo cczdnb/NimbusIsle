@@ -1,5 +1,5 @@
 //! 在屏幕外测量调节大小前后的翻页渲染，覆盖设置同时打开与关闭的情况。
-use daozai::app::{App,Env,Options,CANVAS_W,WIN_W,WIN_H};
+use yunyu::app::{App,Env,Options,CANVAS_W,WIN_W,WIN_H};
 use eframe::egui;
 use std::time::Instant;
 

@@ -31,12 +31,12 @@ fn find_rc() -> Option<PathBuf> {
 
 fn main() {
     println!("cargo:rerun-if-changed=app.rc");
-    println!("cargo:rerun-if-changed=assets/daozai.ico");
+    println!("cargo:rerun-if-changed=assets/yunyu.ico");
     println!("cargo:rerun-if-changed=build.rs");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
-    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("daozai.res");
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("yunyu.res");
     let Some(rc) = find_rc() else {
         println!("cargo:warning=rc.exe 未找到，跳过图标资源");
         return;

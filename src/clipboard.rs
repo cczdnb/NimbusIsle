@@ -158,7 +158,7 @@ impl Drop for Watcher {
 pub fn watch(shared: Shared, repaint: impl Fn() + Send + 'static) -> Option<Watcher> {
     let stop = Arc::new(win::Stop::default());
     let thread_stop = stop.clone();
-    std::thread::Builder::new().name("daozai-clipboard".into()).spawn(move || {
+    std::thread::Builder::new().name("yunyu-clipboard".into()).spawn(move || {
         // 启动失败（极少见）时剪贴板页只是没有新记录，不影响其他功能。
         let _ = win::run(shared, Box::new(repaint), &thread_stop);
     }).ok()?;
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn reopening_restores_history_and_respects_manual_cleanup() {
-        let path = std::env::temp_dir().join(format!("daozai-clip-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("yunyu-clip-{}.json", std::process::id()));
         std::fs::write(&path, br#"[{"text":"old","at":"08:00"}]"#).unwrap();
         let mut history = History::load_from(path.clone());
         assert!(history.items[0].pinned);

@@ -6,7 +6,7 @@ $testRoot = Join-Path $project ('target\update-test-' + [Guid]::NewGuid().ToStri
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $oldLocal = $env:LOCALAPPDATA
 try {
-    $env:LOCALAPPDATA = if ($EncryptedCache) { Join-Path $oldLocal ('DaozaiUpdateTest-' + [Guid]::NewGuid().ToString('N')) } else { Join-Path $testRoot 'local' }
+    $env:LOCALAPPDATA = if ($EncryptedCache) { Join-Path $oldLocal ('YunyuUpdateTest-' + [Guid]::NewGuid().ToString('N')) } else { Join-Path $testRoot 'local' }
     New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
     if ($EncryptedCache -and -not ((Get-Item -LiteralPath $env:LOCALAPPDATA).Attributes -band [IO.FileAttributes]::Encrypted)) { throw '测试缓存目录必须启用 EFS 加密' }
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'

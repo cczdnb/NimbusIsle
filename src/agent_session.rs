@@ -792,7 +792,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn cursor_header_and_transcript_become_one_row() {
-        let dir = std::env::temp_dir().join(format!("daozai-session-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("yunyu-session-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = dir.join("state.vscdb");
         let projects = dir.join("projects");

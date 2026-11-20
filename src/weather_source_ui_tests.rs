@@ -19,7 +19,7 @@ fn weather_badge_only_dims_after_repeated_failures_and_old_data(){
             let snapshot=crate::weather::Snapshot{place:"广州".into(),temp:23.0,code:2,day:true,at:chrono::Utc::now().timestamp()-age,..Default::default()};
             let output=h.ctx.run(Default::default(),|ctx|{egui::CentralPanel::default().show(ctx,|ui|{
                 let c=crate::paint::Card::new(ui,Pos2::ZERO,ui.max_rect());
-                let layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false,false,false,false);
+                let layout=crate::bar_layout::Layout::new(false,0,false,false,false,false,true,false,false,false,false,false);
                 h.app.paint_pill_weather(&c,100.0,&layout,&snapshot);
                 h.app.paint_side_weather(&c,220.0,30.0,&snapshot);
             });});
@@ -46,14 +46,14 @@ fn draw(h:&mut H,events:Vec<egui::Event>,size:Vec2,scale:f32)->(egui::FullOutput
     let children=std::sync::Arc::new(Mutex::new(Vec::new()));let capture=children.clone();h.t+=0.02;let time=h.t;let tutorial_open=h.app.weather_source.tutorial_open;
     egui::Context::set_immediate_viewport_renderer(move|ctx,mut viewport|{
         let id=viewport.ids.this;
-        let tutorial=id==egui::ViewportId::from_hash_of("daozai-weather-tutorial");
+        let tutorial=id==egui::ViewportId::from_hash_of("yunyu-weather-tutorial");
         let raw=egui::RawInput{viewport_id:id,screen_rect:Some(Rect::from_min_size(Pos2::ZERO,if tutorial{egui::vec2(820.0,680.0)}else{size})),time:Some(time),
             events:if tutorial==tutorial_open{events.clone()}else{vec![]},viewports:std::iter::once((id,egui::ViewportInfo{native_pixels_per_point:Some(scale),..Default::default()})).collect(),..Default::default()};
         let out=ctx.run(raw,|ctx|(viewport.viewport_ui_cb)(ctx));capture.lock().unwrap().push((id,out));
     });
     let root=h.ctx.run(egui::RawInput{time:Some(time),..Default::default()},|ctx|h.app.settings_ui(ctx,false));
     let child_frames=std::mem::take(&mut *children.lock().unwrap());
-    h.shapes=child_frames.iter().find(|(id,_)|*id==egui::ViewportId::from_hash_of("daozai-settings")).unwrap().1.shapes.clone();
+    h.shapes=child_frames.iter().find(|(id,_)|*id==egui::ViewportId::from_hash_of("yunyu-settings")).unwrap().1.shapes.clone();
     (root,child_frames)
 }
 
@@ -145,12 +145,12 @@ fn qweather_draft_hides_default_cities_requires_validation_and_can_collapse_with
         assert!(!text(&h).contains("frontend-placeholder"));assert_eq!(format!("{:?}",h.app.settings),settings);
         h.app.settings.save();let saved=std::fs::read_to_string(crate::model::config_dir().join("settings.txt")).unwrap();assert!(!saved.contains("frontend-placeholder"));
         click(&mut h,"配置教程 ↗");assert!(h.app.weather_source.tutorial_open);
-        let (_,children)=draw(&mut h,vec![],egui::vec2(740.0,980.0),1.0);assert!(children.iter().any(|(id,_)|*id==egui::ViewportId::from_hash_of("daozai-weather-tutorial")));
+        let (_,children)=draw(&mut h,vec![],egui::vec2(740.0,980.0),1.0);assert!(children.iter().any(|(id,_)|*id==egui::ViewportId::from_hash_of("yunyu-weather-tutorial")));
         let second_tiles:Vec<_>=h.ctx.tex_manager().read().allocated().filter(|(_,meta)|meta.name.starts_with("weather-tutorial-1-")).map(|(id,_)|*id).collect();assert!(!second_tiles.is_empty());
         let mut second_visible=false;
         for frame in 0..45 {
             let mut events=vec![egui::Event::PointerMoved(Pos2::new(400.0,400.0))];if frame==2||frame==24{events.push(egui::Event::MouseWheel{unit:egui::MouseWheelUnit::Point,delta:egui::vec2(0.0,if frame==2{-2000.0}else{-10000.0}),modifiers:Default::default()});}
-            let (_,children)=draw(&mut h,events,egui::vec2(740.0,980.0),1.0);let help=&children.iter().find(|(id,_)|*id==egui::ViewportId::from_hash_of("daozai-weather-tutorial")).unwrap().1;
+            let (_,children)=draw(&mut h,events,egui::vec2(740.0,980.0),1.0);let help=&children.iter().find(|(id,_)|*id==egui::ViewportId::from_hash_of("yunyu-weather-tutorial")).unwrap().1;
             second_visible|=help.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Rect(r)if second_tiles.contains(&r.fill_texture_id())&&s.clip_rect.intersects(r.rect)));
         }
         assert!(second_visible,"长图应能连续滚到新教程后半段");
@@ -218,7 +218,7 @@ fn qweather_data_credit_opens_the_provider_site_in_forecast_and_solar_views(){
 #[ignore="按需导出和风配置、离线教程和署名的原生界面"]
 fn qweather_frontend_gallery(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
-    let dest=std::path::PathBuf::from(std::env::var_os("DAOZAI_QWEATHER_PREVIEW_DIR").expect("需指定预览目录"));std::fs::create_dir_all(&dest).unwrap();
+    let dest=std::path::PathBuf::from(std::env::var_os("YUNYU_QWEATHER_PREVIEW_DIR").expect("需指定预览目录"));std::fs::create_dir_all(&dest).unwrap();
     for (name,dark,size) in [("weather-source-cards-dark",true,egui::vec2(500.0,86.0)),("weather-source-cards-light",false,egui::vec2(500.0,86.0)),("weather-source-cards-compact",true,egui::vec2(350.0,86.0))]{
         let mut h=H::new();h.ctx.set_visuals(if dark{egui::Visuals::dark()}else{egui::Visuals::light()});h.ctx.set_pixels_per_point(2.0);
         let mut raster=crate::preview_raster::Raster::new((size.x*2.0)as usize,(size.y*2.0)as usize);
@@ -272,7 +272,7 @@ fn qweather_frontend_gallery(){
             if end&&frame==2{events.push(egui::Event::MouseWheel{unit:egui::MouseWheelUnit::Point,delta:egui::vec2(0.0,-10000.0),modifiers:Default::default()});}
             let (root,children)=draw(&mut h,events,size,scale);raster.update_textures(&root.textures_delta);
             for (_,out) in &children{raster.update_textures(&out.textures_delta);}
-            let id=egui::ViewportId::from_hash_of(if help{"daozai-weather-tutorial"}else{"daozai-settings"});
+            let id=egui::ViewportId::from_hash_of(if help{"yunyu-weather-tutorial"}else{"yunyu-settings"});
             let out=&children.iter().find(|(child,_)|*child==id).unwrap().1;
             if frame==frames-1{
                 raster.buf.fill([0.10,0.10,0.11,1.0]);raster.draw(&h.ctx.tessellate(out.shapes.clone(),out.pixels_per_point),out.pixels_per_point);

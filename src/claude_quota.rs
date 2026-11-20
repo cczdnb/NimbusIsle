@@ -8,8 +8,8 @@ use std::{fs,path::{Path,PathBuf}};
 mod desktop_cache;
 
 const HISTORY:&str="plan-usage-history.json";
-const CODE_USAGE:&str="daozai-usage.json";
-const COLLECTOR:&str="daozai-statusline.ps1";
+const CODE_USAGE:&str="yunyu-usage.json";
+const COLLECTOR:&str="yunyu-statusline.ps1";
 pub(super) struct Profile {pub slot:String,pub label:String}
 
 pub(super) fn paths(roaming:&Path,local:&Path)->Vec<PathBuf>{
@@ -155,7 +155,7 @@ mod tests {
             assert_eq!(fs::read(&account.source).unwrap(),identity);assert_eq!(fs::read(history_path).unwrap(),history);count+=1;
         }assert!(count>0,"尚无已绑定的 Claude 桌面版账号");
     }
-    fn dir()->PathBuf{let p=std::env::temp_dir().join(format!("daozai-local-claude-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));fs::create_dir_all(&p).unwrap();p}
+    fn dir()->PathBuf{let p=std::env::temp_dir().join(format!("yunyu-local-claude-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));fs::create_dir_all(&p).unwrap();p}
     fn earlier_login(path:&Path){
         let stamp=std::time::SystemTime::now()-std::time::Duration::from_secs(300);
         fs::File::options().write(true).open(path).unwrap().set_modified(stamp).unwrap();
@@ -278,7 +278,7 @@ mod tests {
     }
     #[test]
     fn local_desktop_history_works_without_a_login_token_and_keeps_the_record_time(){
-        let dir=std::env::temp_dir().join(format!("daozai-local-claude-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let dir=std::env::temp_dir().join(format!("yunyu-local-claude-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir_all(&dir).unwrap();let source=dir.join("config.json");
         let identity=serde_json::json!({"lastKnownAccountUuid":"local-user","oauth:tokenCacheV2":"unreadable-token"}).to_string();
         fs::write(&source,&identity).unwrap();earlier_login(&source);

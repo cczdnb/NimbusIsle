@@ -156,7 +156,7 @@ impl State {
             ctx.load_texture("update-logo", egui::ColorImage::from_rgba_unmultiplied([icon.width as usize,icon.height as usize],&icon.rgba),egui::TextureOptions::LINEAR)
         }).id();
         let installing = self.rx.is_some() && self.cancel.is_none();
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("daozai-update"),
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("yunyu-update"),
             egui::ViewportBuilder::default().with_title("云屿更新").with_icon(theme::app_icon())
                 .with_inner_size([520.0, 416.0]).with_resizable(false).with_decorations(false)
                 .with_transparent(true).with_active(true), |ctx, _| {
@@ -201,7 +201,7 @@ impl State {
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new("云屿有新版本了").font(theme::font(21.0,W::Semibold)));
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(option_env!("DAOZAI_BUILD_LABEL").unwrap_or(env!("CARGO_PKG_VERSION"))).color(theme::DIM));
+                                    ui.label(egui::RichText::new(option_env!("YUNYU_BUILD_LABEL").unwrap_or(env!("CARGO_PKG_VERSION"))).color(theme::DIM));
                                     ui.label(egui::RichText::new("→").color(theme::DIM));
                                     egui::Frame::new().fill(theme::alpha_blue(0.12)).corner_radius(6.0)
                                         .inner_margin(egui::Margin::symmetric(8,3)).show(ui, |ui| {
@@ -458,8 +458,8 @@ fn parse_release(value: &serde_json::Value, current: &str) -> Result<Option<Stri
 #[cfg(test)]
 mod install_size_tests {
     #[test]
-    fn install_size_counts_only_daozai_files() {
-        let dir = std::env::temp_dir().join(format!("daozai-size-{}", std::process::id()));
+    fn install_size_counts_only_yunyu_files() {
+        let dir = std::env::temp_dir().join(format!("yunyu-size-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("Other App")).unwrap();
         std::fs::write(dir.join("yunyu.exe"), vec![0u8; 3000]).unwrap();
         std::fs::write(dir.join("LICENSE"), vec![0u8; 100]).unwrap();
@@ -670,7 +670,7 @@ mod tests {
         let mut state = State::default();
         let (tx, rx) = mpsc::channel(); state.rx = Some(rx);
         state.cancel = Some(Arc::new(AtomicBool::new(true)));
-        let work = std::env::temp_dir().join(format!("daozai-cancel-test-{}", std::process::id()));
+        let work = std::env::temp_dir().join(format!("yunyu-cancel-test-{}", std::process::id()));
         std::fs::create_dir_all(&work).unwrap();
         tx.send(Event::Ready(work.clone())).unwrap();
         state.poll(&egui::Context::default());
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     #[ignore = "按需导出发现新版时的设置界面，使用独立数据目录"]
     fn available_update_preview() {
-        let dest = std::path::PathBuf::from(std::env::var_os("DAOZAI_UPDATE_PREVIEW_DIR").expect("需指定预览目录"));
+        let dest = std::path::PathBuf::from(std::env::var_os("YUNYU_UPDATE_PREVIEW_DIR").expect("需指定预览目录"));
         std::fs::create_dir_all(&dest).unwrap();
         let old = std::env::var_os("YUNYU_DATA_DIR");
         std::env::set_var("YUNYU_DATA_DIR", dest.join("data"));
@@ -723,7 +723,7 @@ mod tests {
         let capture = output.clone();
         egui::Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
             let id = viewport.ids.this;
-            assert_eq!(id, egui::ViewportId::from_hash_of("daozai-update"));
+            assert_eq!(id, egui::ViewportId::from_hash_of("yunyu-update"));
             let raw = egui::RawInput {
                 viewport_id: id,
                 viewports: std::iter::once((id, egui::ViewportInfo { native_pixels_per_point: Some(1.0), ..Default::default() })).collect(),

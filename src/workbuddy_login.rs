@@ -36,7 +36,7 @@ fn open_browser(_url:&str)->Result<(),String>{Err("WorkBuddy 登录暂仅支持 
 
 pub(super) fn connect(expected:Option<&str>,cancel:Arc<AtomicBool>)->Result<(String,Snapshot),String>{
     let agent=super::super::http_agent();
-    let value=read(agent.post(&format!("{ORIGIN}/v2/plugin/auth/state?platform=daozai"))
+    let value=read(agent.post(&format!("{ORIGIN}/v2/plugin/auth/state?platform=yunyu"))
         .set("X-No-Authorization","true").set("X-No-User-Id","true").set("Content-Type","application/json")
         .send_string("{}").map_err(|_|"无法创建 WorkBuddy 登录请求")?)?;
     let (state,link)=login_request(value)?;
@@ -84,7 +84,7 @@ mod tests{
     #[test]
     fn login_url_must_match_official_origin_and_state(){
         let make=|url|json!({"code":0,"data":{"state":"test","authUrl":url}});
-        assert!(login_request(make("https://www.codebuddy.cn/login?state=test&platform=daozai")).is_ok());
+        assert!(login_request(make("https://www.codebuddy.cn/login?state=test&platform=yunyu")).is_ok());
         for url in ["https://example.com/login?state=test","https://www.codebuddy.cn/login?state=other","http://www.codebuddy.cn/login?state=test"]{
             assert!(login_request(make(url)).is_err());
         }

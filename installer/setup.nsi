@@ -25,8 +25,8 @@ VIAddVersionKey /LANG=2052 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=2052 "FileDescription" "${APP_NAME}安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "cc"
-!define MUI_ICON "${PROJECT_DIR}\assets\daozai.ico"
-!define MUI_UNICON "${PROJECT_DIR}\assets\daozai.ico"
+!define MUI_ICON "${PROJECT_DIR}\assets\yunyu.ico"
+!define MUI_UNICON "${PROJECT_DIR}\assets\yunyu.ico"
 !define MUI_ABORTWARNING
 Var BrandIcon
 Var PathInput
@@ -91,7 +91,7 @@ Function InstallPage
   nsDialogs::Create 1018
   Pop $0
   InitPluginsDir
-  File /oname=$PLUGINSDIR\brand.ico "${PROJECT_DIR}\assets\daozai.ico"
+  File /oname=$PLUGINSDIR\brand.ico "${PROJECT_DIR}\assets\yunyu.ico"
   ${NSD_CreateIcon} 0 6u 44u 44u ""
   Pop $0
   System::Call 'user32::LoadImageW(p 0, w "$PLUGINSDIR\brand.ico", i 1, i 64, i 64, i 0x10) p .r1'
@@ -305,7 +305,6 @@ Section "Uninstall"
   Call un.CheckClosed
   Delete "$INSTDIR\yunyu.exe"
   Delete "$INSTDIR\yunyu-previous.exe"
-  Delete "$INSTDIR\daozai-v0.2-backup.exe"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
   Delete "$INSTDIR\uninstall.ps1"

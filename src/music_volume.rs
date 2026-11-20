@@ -167,7 +167,7 @@ mod tests {
         assert!(submit(Box::new(move||{let _=entered.send(());let _=wait.recv_timeout(Duration::from_secs(10));})));
         started.recv_timeout(Duration::from_secs(2)).unwrap();
         let mut reader=Reader::default();let start=Instant::now();
-        for i in 0..20 {assert_eq!(reader.poll(&format!("daozai-stuck-{i}.exe")),None);}
+        for i in 0..20 {assert_eq!(reader.poll(&format!("yunyu-stuck-{i}.exe")),None);}
         assert!(start.elapsed()<Duration::from_millis(200),"音量线程卡住时，采样线程不能跟着等待");
         drop(release);
     }
@@ -184,8 +184,8 @@ mod tests {
 
     #[test]
     fn unknown_player_cannot_change_system_volume(){
-        assert_eq!(read("daozai-missing-player.exe"),None);
-        assert!(!set_volume("daozai-missing-player.exe",100));
+        assert_eq!(read("yunyu-missing-player.exe"),None);
+        assert!(!set_volume("yunyu-missing-player.exe",100));
         assert!(!set_mute("",true));
     }
 
@@ -216,7 +216,7 @@ mod tests {
             assert!((b.GetMasterVolume().unwrap()-0.27).abs()<0.001);
             assert!(set_mute(&source,true));assert!(a.GetMute().unwrap().as_bool() && b.GetMute().unwrap().as_bool());
             assert!(set_volume(&source,19));assert_eq!(read(&source),Some((19,false)));
-            assert!(!set_volume("daozai-missing-player.exe",100));assert_eq!(read(&source),Some((19,false)));
+            assert!(!set_volume("yunyu-missing-player.exe",100));assert_eq!(read(&source),Some((19,false)));
             assert!(set_volume(&source,999));assert_eq!(read(&source),Some((100,false)));
             assert_eq!(crate::system::Snapshot::read().volume,before,"应用音量不能改变系统主音量或静音");
             println!("双会话音量、静音、解除静音、边界和系统音量隔离验证通过");

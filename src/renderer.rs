@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn fallback_marker_turns_on_compat_rendering_once() {
         let _g = crate::ui_tests::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("daozai-renderer-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("yunyu-renderer-{}", std::process::id()));
         std::env::set_var("YUNYU_DATA_DIR", &dir);
         assert!(apply_pending_fallback().is_none(), "没有标记时不改动设置");
         request_fallback("igxelpicd64.dll");

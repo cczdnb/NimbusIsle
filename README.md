@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/daozai-logo.png" width="112" alt="云屿" />
+<img src="assets/yunyu-logo.png" width="112" alt="云屿" />
 
 # 云屿
 
@@ -17,7 +17,7 @@ Windows 桌面伙伴，把消息、音乐、日程、天气和 AI 额度放到�
 
 </div>
 
-云屿是一款开源的 Windows 桌面小工具。平时收在屏幕边缘，鼠标靠近就展开。切歌、看日程、复制验证码、记一条待办，都能在岛上完成。收起时，小岛上的吉祥物会眨眼、打盹，音乐响起时一起唱歌。
+云屿是一款开源的 Windows 桌面小工具。平时收在屏幕边缘，鼠标靠近就展开。切歌、看日程、复制验证码、记一条待办，都能在岛上完成。收起时，岛上留着云屿的吉祥物：一张探出云朵的脸。它会眨眼、换表情，音乐响起时跟着做表情。可以在设置里关掉。
 
 可以选刘海或胶囊，停在顶部、左侧或右侧，只留下自己要用的页面。云屿用 Rust 和 egui 写成，不依赖 Electron。
 
@@ -140,6 +140,7 @@ Windows 桌面伙伴，把消息、音乐、日程、天气和 AI 额度放到�
 | 邮箱 | QQ、163、126、腾讯企业邮、iCloud、Gmail、自定义 IMAP | 打开 IMAP，填写授权码或 App 专用密码 |
 | 日历 | 飞书、钉钉、企业微信、iCloud、CalDAV、Exchange ActiveSync | 服务商给出的同步凭据。装了桌面客户端不等于已经授权 |
 | 第三方待办 | Jira、Linear、GitHub Issues、Notion、飞书、Windows 待办、自建 JSON | 对应令牌或一次微软登录。令牌进凭据管理器 |
+| 下班倒计时 | 本机设置 | 设一个下班时间，倒计时精确到秒。不联网 |
 | AI 额度 | Codex、Claude、Kimi、Grok Bot、Gemini、ZCode、WorkBuddy、DeepSeek、豆包、Kiro，以及套餐和中转站 | 本机登录、浏览器授权或 API Key，以设置里的入口为准 |
 
 QQ 收信、邮件日程和飞书个人日历做过真实账号测试。钉钉、企业微信的日历是否能同步，取决于服务端配置，还需要你自己的账号再确认一次。

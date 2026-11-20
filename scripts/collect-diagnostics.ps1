@@ -4,7 +4,7 @@ param(
     [switch]$RevealArchive
 )
 $ErrorActionPreference = 'Stop'
-$collectionRoot = Join-Path ([IO.Path]::GetTempPath()) ('daozai-diagnostics-' + [guid]::NewGuid().ToString('N'))
+$collectionRoot = Join-Path ([IO.Path]::GetTempPath()) ('yunyu-diagnostics-' + [guid]::NewGuid().ToString('N'))
 $utf8 = New-Object System.Text.UTF8Encoding($true)
 $missing = New-Object 'System.Collections.Generic.List[string]'
 function Save-Text([string]$Name, [string]$Value) {
@@ -53,12 +53,12 @@ try {
         $info.FeatureSettings = @([IO.File]::ReadAllLines($settingsPath) | Where-Object { $_ -match '^(notifications|wechat_notifications|wechat_tray_open|wecom_notifications|feishu_notifications|dingtalk_notifications|read_notifications|qq_only|visible_pages|page_order|lyrics_enabled|island_lyrics|render_compat|calendar_auto_sync|mail_enabled)=' })
     }
     try {
-        Add-Type -TypeDefinition 'public static class DaozaiDiagnosticGui { [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetGuiResources(System.IntPtr process, uint flags); }'
+        Add-Type -TypeDefinition 'public static class YunyuDiagnosticGui { [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetGuiResources(System.IntPtr process, uint flags); }'
         $info.Processes = @(Get-Process -Name yunyu -ErrorAction SilentlyContinue | ForEach-Object {
             $processInfo = [ordered]@{ Id = $_.Id; StartedAt = $_.StartTime.ToString('o'); Handles = $_.HandleCount; Threads = $_.Threads.Count; PrivateBytes = $_.PrivateMemorySize64; WorkingBytes = $_.WorkingSet64 }
             try {
-                $processInfo.GdiObjects = [DaozaiDiagnosticGui]::GetGuiResources($_.Handle, 0)
-                $processInfo.UserObjects = [DaozaiDiagnosticGui]::GetGuiResources($_.Handle, 1)
+                $processInfo.GdiObjects = [YunyuDiagnosticGui]::GetGuiResources($_.Handle, 0)
+                $processInfo.UserObjects = [YunyuDiagnosticGui]::GetGuiResources($_.Handle, 1)
                 $processInfo.Version = $_.MainModule.FileVersionInfo.FileVersion
                 $processInfo.Sha256 = (Get-FileHash -LiteralPath $_.Path -Algorithm SHA256).Hash
             } catch { $processInfo.Details = '无法读取部分进程信息' }
@@ -85,7 +85,7 @@ try {
     try {
         Add-Type -TypeDefinition @'
 using System; using System.Text; using System.Collections.Generic; using System.Runtime.InteropServices;
-public static class DaozaiDiagnosticWindows {
+public static class YunyuDiagnosticWindows {
     delegate bool Visit(IntPtr window, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(Visit visit, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
@@ -123,7 +123,7 @@ public static class DaozaiDiagnosticWindows {
         })
         $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
         foreach ($client in $clients) { [void]$pids.Add([uint32]$client.Id) }
-        $info.MessengerWindows = @([DaozaiDiagnosticWindows]::Of($pids))
+        $info.MessengerWindows = @([YunyuDiagnosticWindows]::Of($pids))
     } catch { $info.MessengerQuery = '无法读取消息客户端窗口信息' }
     # 系统媒体会话：Windows 当前看到哪些播放器、播放状态与类型；只记「有没有」歌名，不记歌名本身。
     try {

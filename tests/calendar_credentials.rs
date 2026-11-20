@@ -1,13 +1,13 @@
 #![cfg(windows)]
 
-use daozai::calendar::{self, Config, Provider};
+use yunyu::calendar::{self, Config, Provider};
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn failed_configuration_preserves_old_credentials() {
     let _guard = ENV_LOCK.lock().unwrap();
     let id = format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-    let path = std::env::temp_dir().join(format!("daozai-credential-test-{id}"));
+    let path = std::env::temp_dir().join(format!("yunyu-credential-test-{id}"));
     std::fs::write(&path, "不是目录").unwrap();
     std::env::set_var("YUNYU_DATA_DIR", &path);
     let old = Config { provider: Provider::Feishu, username: format!("test-old-{id}"), href: None, server: None };
@@ -27,7 +27,7 @@ fn failed_configuration_preserves_old_credentials() {
 fn calendar_platform_connections_are_independent() {
     let _guard = ENV_LOCK.lock().unwrap();
     let id = format!("platforms-{}", std::process::id());
-    let path = std::env::temp_dir().join(format!("daozai-{id}"));
+    let path = std::env::temp_dir().join(format!("yunyu-{id}"));
     std::fs::create_dir_all(&path).unwrap();
     std::env::set_var("YUNYU_DATA_DIR", &path);
     let feishu = Config { provider: Provider::Feishu, username: format!("feishu-{id}"), href: None, server: None };

@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(decode(&payload),Some(song));
         let db=fixture(&payload);
         assert_eq!(entries(&db).unwrap(),vec![payload.as_slice()],"超过 2MB 的其他记录应跳过，而不是放弃整份缓存");
-        let path=std::env::temp_dir().join(format!("daozai-soda-{}-{:?}.db",std::process::id(),std::thread::current().id()));
+        let path=std::env::temp_dir().join(format!("yunyu-soda-{}-{:?}.db",std::process::id(),std::thread::current().id()));
         std::fs::write(&path,&db).unwrap();
         // 撑到 40MB：超过原先整份读取的 32MB 上限。
         std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_len(40*1024*1024).unwrap();
@@ -316,7 +316,7 @@ mod tests {
     fn live_mapped_read_matches_full_read_on_padded_copy(){
         let source=std::path::PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("SodaMusic/LunaCacheV2/entries.db");
         let data=std::fs::read(&source).unwrap();
-        let copy=std::env::temp_dir().join(format!("daozai-soda-live-{}.db",std::process::id()));
+        let copy=std::env::temp_dir().join(format!("yunyu-soda-live-{}.db",std::process::id()));
         std::fs::write(&copy,&data).unwrap();
         let file=std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
         if file.metadata().unwrap().len()<40*1024*1024 {file.set_len(40*1024*1024).unwrap();}

@@ -618,12 +618,12 @@ mod tests {
     #[test]
     #[ignore = "显式验证企业微信账号；仅输出数量，成功后可按环境变量保存连接"]
     fn live_wecom_connection() {
-        let mut cfg = Config { provider: Provider::WeCom, username: std::env::var("DAOZAI_WECOM_USER").unwrap(), href: None, server: None };
-        let password = std::env::var("DAOZAI_WECOM_PASSWORD").unwrap();
+        let mut cfg = Config { provider: Provider::WeCom, username: std::env::var("YUNYU_WECOM_USER").unwrap(), href: None, server: None };
+        let password = std::env::var("YUNYU_WECOM_PASSWORD").unwrap();
         let month = super::super::fetch_month(&cfg, &password, chrono::Local::now().date_naive()).unwrap();
         let upcoming = super::super::fetch(&cfg, &password).unwrap();
         eprintln!("wecom month_events={} upcoming_events={}", month.events.len(), upcoming.events.len());
-        if std::env::var("DAOZAI_WECOM_SAVE").as_deref() == Ok("1") {
+        if std::env::var("YUNYU_WECOM_SAVE").as_deref() == Ok("1") {
             cfg.href = Some(month.href);
             super::super::save_connection(&cfg, &password, None).unwrap();
         }

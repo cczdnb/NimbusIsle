@@ -6,7 +6,7 @@ $logs = Join-Path $root 'data\diagnostics'
 $packages = Join-Path $root 'out'
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 try {
-    $fakePath = Join-Path $env:USERPROFILE 'DaozaiFixture\player.exe'
+    $fakePath = Join-Path $env:USERPROFILE 'YunyuFixture\player.exe'
     $json = @{ Path = $fakePath } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText((Join-Path $logs 'resources.log'), $json)
     [IO.File]::WriteAllText((Join-Path $logs 'frames.log'), 'frame-current')
@@ -19,7 +19,7 @@ try {
     try {
         $reader = [IO.StreamReader]::new($zip.GetEntry('resources.log').Open())
         try { $masked = ($reader.ReadToEnd() | ConvertFrom-Json).Path } finally { $reader.Dispose() }
-        if ($masked -ne '%USERPROFILE%\DaozaiFixture\player.exe') { throw '诊断包中的 JSON 路径没有隐去用户目录' }
+        if ($masked -ne '%USERPROFILE%\YunyuFixture\player.exe') { throw '诊断包中的 JSON 路径没有隐去用户目录' }
         foreach ($name in @('frames.log','frames.previous.log')) {
             if (!$zip.GetEntry($name)) { throw "诊断包缺少 $name" }
         }

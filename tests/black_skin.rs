@@ -1,8 +1,8 @@
-use daozai::model::Settings;
+use yunyu::model::Settings;
 
 #[test]
 fn legacy_material_settings_are_retired() {
-    let path = std::env::temp_dir().join(format!("daozai-black-skin-{}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("yunyu-black-skin-{}", std::process::id()));
     std::fs::create_dir_all(&path).unwrap();
     std::env::set_var("YUNYU_DATA_DIR", &path);
     for skin in ["glass", "clear", "black"] {

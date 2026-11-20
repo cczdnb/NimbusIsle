@@ -18,7 +18,7 @@ pub fn requested(mut args:impl Iterator<Item=String>)->bool {args.any(|arg|arg==
 pub fn run(data_dir:&Path)->Result<(),String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE:u32=0x0000_0010;
-    let work=std::env::temp_dir().join(format!("daozai-diagnostics-tool-{}",std::process::id()));
+    let work=std::env::temp_dir().join(format!("yunyu-diagnostics-tool-{}",std::process::id()));
     std::fs::create_dir_all(&work).map_err(|e|format!("无法创建临时目录：{e}"))?;
     let script=work.join("collect-diagnostics.ps1");
     let result=(||{

@@ -100,7 +100,7 @@ fn five_client_icons_fit_collapsed_and_expand_to_their_own_click_targets(){
 #[ignore="按需导出办公软件提醒的合成预览，不操作真实客户端"]
 fn office_notice_gallery(){
     let _guard=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
-    let dest=std::path::PathBuf::from(std::env::var_os("DAOZAI_OFFICE_PREVIEW").expect("需指定预览目录"));
+    let dest=std::path::PathBuf::from(std::env::var_os("YUNYU_OFFICE_PREVIEW").expect("需指定预览目录"));
     std::fs::create_dir_all(&dest).unwrap();
     for source in Messenger::OFFICE{
         let mut h=H::new();enable(&mut h.app);h.app.settings.pet=false;
@@ -114,7 +114,7 @@ fn office_notice_gallery(){
 #[ignore="按需检查消息图标在深浅皮肤下的实际画面，不操作真实客户端"]
 fn messenger_brand_icon_gallery(){
     let _guard=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
-    let dest=std::path::PathBuf::from(std::env::var_os("DAOZAI_OFFICE_PREVIEW").expect("需指定预览目录"));
+    let dest=std::path::PathBuf::from(std::env::var_os("YUNYU_OFFICE_PREVIEW").expect("需指定预览目录"));
     std::fs::create_dir_all(&dest).unwrap();
     for skin in [crate::model::Skin::Classic,crate::model::Skin::GlassLight,crate::model::Skin::GlassDark]{
         let mut h=H::new();enable(&mut h.app);h.app.settings.pet=false;h.app.settings.skin=skin;

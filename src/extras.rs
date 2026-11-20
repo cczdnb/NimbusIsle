@@ -1195,7 +1195,7 @@ fn support_author(ui:&mut egui::Ui){
         .corner_radius(10.0).show(ui,|ui|{
             ui.set_min_width(ui.available_width());
             ui.vertical_centered(|ui|{
-                ui.add(egui::Image::new(egui::include_image!("../assets/support/daozai-coffee.svg")).fit_to_exact_size(egui::vec2(211.0,110.0)));
+                ui.add(egui::Image::new(egui::include_image!("../assets/support/yunyu-coffee.png")).fit_to_exact_size(egui::vec2(211.0,110.0)));
             });
         });
     ui.add_space(9.0);
@@ -1305,12 +1305,31 @@ const SETTINGS_GROUPS: [(&str,usize,usize);10] = [
 ];
 
 impl App {
+    fn offwork_settings(&mut self,ui:&mut egui::Ui){
+        setting_row(ui,"显示倒计时","收起时在常驻栏显示今天还要多久下班",&mut self.settings.offwork);
+        if !self.settings.offwork {
+            settings_hint(ui,"打开后，收起的岛按你设的下班时间倒计时。");
+            return;
+        }
+        ui.separator();
+        settings_control_row_right(ui,"下班时间",|ui|{time_stepper(ui,&mut self.settings.offwork_end,"offwork-end");});
+        ui.separator();
+        setting_number(ui,"快下班",&mut self.settings.offwork_soon,5,120," 分钟",5.0);
+        ui.separator();
+        setting_row(ui,"只在工作日","周六日不显示倒计时",&mut self.settings.offwork_weekdays);
+        ui.separator();
+        setting_row(ui,"倒计时专属表情","打开后改用班次专属表情。图还没画好，打开时先不播；关掉则先用现在的表情。",&mut self.settings.offwork_own_faces);
+        settings_hint(ui,"每天走到这个钟点。栏已经放满时，倒计时挤在原来的宽度里，先收起 CPU 和内存。");
+        let status=self.offwork_status();
+        ui.label(egui::RichText::new(status).size(12.0).color(settings_color(&ui.ctx().clone(),Color32::from_gray(170),Color32::from_gray(90))));
+    }
+
     pub fn settings_ui(&mut self,ctx:&egui::Context,autostart:bool){
         if !self.settings_open{self.window_layout().close();release_support_codes(ctx);self.weather_source.close();}
         self.updates.poll(ctx);
         self.updates.dialog_ui(ctx);
         if !self.settings_open{return;}
-        let id=egui::ViewportId::from_hash_of("daozai-settings");
+        let id=egui::ViewportId::from_hash_of("yunyu-settings");
         let focus_requested=std::mem::take(&mut self.settings_focus_requested);
         let opening=self.window_layout().open();
         ctx.show_viewport_immediate(id,egui::ViewportBuilder::default().with_title("云屿设置").with_icon(theme::app_icon()).with_inner_size([690.0,560.0]).with_min_inner_size([600.0,450.0]).with_visible(false).with_active(false).with_window_level(egui::WindowLevel::Normal),|ctx,_|{
@@ -1446,6 +1465,8 @@ impl App {
                             ui.separator();
                             setting_row(ui,"内存","收起时在常驻栏显示内存占用，默认关闭",&mut self.settings.show_mem);
                         });
+                        settings_label(ui,"下班倒计时");
+                        settings_card(ui,|ui|self.offwork_settings(ui));
                         settings_label(ui,"常驻排列");
                         settings_card(ui,|ui|self.resident_order_settings(ui));
                         settings_label(ui,"状态组件");
@@ -1586,7 +1607,7 @@ impl App {
                                 if settings_segmented(ui,&mut self.settings.dock,&docks,64.0) {self.settings.island_offset=0;}
                             });
                             if self.settings.dock.is_side() {
-                                ui.label(egui::RichText::new("收起时竖向排列时间、电池、播放、专注和 AI 额度；展开面板从屏幕边缘滑出。吉祥物和岛上歌词只在顶部停靠时显示。").size(11.0).color(ui.visuals().weak_text_color()));
+                                ui.label(egui::RichText::new("收起时竖向排列时间、电池、播放、专注和 AI 额度；展开面板从屏幕边缘滑出。吉祥物贴在胶囊内侧，岛上歌词只在顶部停靠时显示。").size(11.0).color(ui.visuals().weak_text_color()));
                             }
                             ui.add_space(4.0);
                             let side=self.settings.dock.is_side();
@@ -1640,6 +1661,15 @@ impl App {
                             let mut pet=self.settings.pet;
                             setting_row(ui,"云屿吉祥物","收起时常驻，播放音乐时一起唱歌",&mut pet);
                             if pet!=self.settings.pet {self.set_pet(pet);}
+                            if self.settings.pet {
+                                settings_control_row_right(ui,"吉祥物位置",|ui|{
+                                    let mut place=self.settings.pet_place;
+                                    if settings_segmented(ui,&mut place,&[(crate::model::PetPlace::Island,"岛上"),(crate::model::PetPlace::Head,"岛头"),(crate::model::PetPlace::Tail,"岛尾"),(crate::model::PetPlace::Auto,"自动")],52.0) {
+                                        self.settings.pet_place=place;
+                                        self.settings.save();
+                                    }
+                                });
+                            }
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");

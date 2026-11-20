@@ -455,7 +455,7 @@ impl State {
         if manual { self.last_manual = Instant::now(); }
         self.note = "正在同步…".into();
         self.note_error = false;
-        let _ = std::thread::Builder::new().name("daozai-todo-sync".into()).spawn(move || {
+        let _ = std::thread::Builder::new().name("yunyu-todo-sync".into()).spawn(move || {
             let result = adapters::sync(source, &address, &token, soon, manual);
             let _ = tx.send(result);
         });
@@ -501,7 +501,7 @@ impl State {
         self.writing = true;
         self.note = "正在写回…".into();
         self.note_error = false;
-        let _ = std::thread::Builder::new().name("daozai-todo-write".into()).spawn(move || {
+        let _ = std::thread::Builder::new().name("yunyu-todo-write".into()).spawn(move || {
             let result = if completing {
                 writeback::complete(item.source, &address, &token, &item)
             } else {
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn jira_http_address_is_saved_and_reloaded() {
         let dir = std::env::temp_dir().join(format!(
-            "daozai-jira-http-{}-{}",
+            "yunyu-jira-http-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));

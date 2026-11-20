@@ -61,8 +61,8 @@ if (Test-Path $luna) { Say ("SodaMusic 目录内容: " + ((Get-ChildItem $luna |
 
 Say ""
 Say "== 云屿 =="
-$daozai = Get-Process yunyu -ErrorAction SilentlyContinue | Where-Object Path | Select-Object -First 1
-if ($daozai) { Say ("运行路径: " + $daozai.Path + "  版本: " + (Get-Item $daozai.Path).VersionInfo.ProductVersion) } else { Say "云屿未运行或无法读取路径（可能以管理员身份运行）" }
+$yunyu = Get-Process yunyu -ErrorAction SilentlyContinue | Where-Object Path | Select-Object -First 1
+if ($yunyu) { Say ("运行路径: " + $yunyu.Path + "  版本: " + (Get-Item $yunyu.Path).VersionInfo.ProductVersion) } else { Say "云屿未运行或无法读取路径（可能以管理员身份运行）" }
 $log = Join-Path $env:APPDATA 'Yunyu\diagnostics\lyrics.log'
 if (Test-Path $log) {
     Say "最近的汽水歌词记录（最多 15 条）："

@@ -970,7 +970,7 @@ mod tests {
     #[test]
     #[ignore="需要已启动并位于后台的微信窗口；仅向测试窗口发送模拟事件"]
     fn local_wechat_background_window(){unsafe{
-        let target:isize=std::env::var("DAOZAI_TEST_WECHAT_HWND").unwrap().parse().unwrap();
+        let target:isize=std::env::var("YUNYU_TEST_WECHAT_HWND").unwrap().parse().unwrap();
         let listener=Listener::new(Default::default()).unwrap();
         let hwnd=listener.hwnd;
         let message=RegisterWindowMessageW(w!("SHELLHOOK"));

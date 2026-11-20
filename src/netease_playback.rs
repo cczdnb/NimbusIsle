@@ -423,7 +423,7 @@ fn find_in_queue<R:Read>(reader:R,key:&str,id:u64)->Option<(NowPlaying,String)>{
 /// 和「格式不符或写入中途截断」（`Err`）：前者文件不变就不必再查，后者要稍后重试。
 fn search_queue<R:Read>(reader:R,key:&str,id:u64)->Result<Option<(NowPlaying,String)>,()>{
     use serde::de::{Deserializer as _,DeserializeSeed,Error as _,IgnoredAny,MapAccess,SeqAccess,Visitor};
-    const FOUND:&str="daozai:found";
+    const FOUND:&str="yunyu:found";
     struct List<'a>{id:u64,found:&'a mut Option<(NowPlaying,String)>}
     impl<'de> DeserializeSeed<'de> for List<'_> {
         type Value=();
@@ -590,7 +590,7 @@ mod tests{
     }
     #[test]
     fn native_log_handles_partial_utf8_and_new_process_without_stale_tracks(){
-        let dir=std::env::temp_dir().join(format!("daozai-elog-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();let path=dir.join("cloudmusic.elog");
+        let dir=std::env::temp_dir().join(format!("yunyu-elog-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();let path=dir.join("cloudmusic.elog");
         let raw=encode(&(event(7,1000,&metadata())+&event(7,2000,"\"native播放资源load完成\",{\"songId\":\"123\"}")));
         let mut reader=Reader{pid:7,..Default::default()};
         for byte in &raw{reader.ingest(&[*byte],3000,false);}
@@ -607,7 +607,7 @@ mod tests{
     }
     #[test]
     fn native_log_resumes_from_queue_metadata_without_any_smtc_session(){
-        let dir=std::env::temp_dir().join(format!("daozai-elog-queue-{}",std::process::id()));let queue=dir.join("webdata/file");std::fs::create_dir_all(&queue).unwrap();
+        let dir=std::env::temp_dir().join(format!("yunyu-elog-queue-{}",std::process::id()));let queue=dir.join("webdata/file");std::fs::create_dir_all(&queue).unwrap();
         let data=serde_json::json!({"list":[{"track":{"id":123,"name":"续播歌曲","artists":[{"name":"歌手"}],"duration":240000,"album":{"picUrl":"https://p1.music.126.net/resume.jpg"}}}]});
         std::fs::write(queue.join("playingList"),data.to_string()).unwrap();let path=dir.join("cloudmusic.elog");
         std::fs::write(&path,encode(&(event(9,1000,"\"native播放资源load完成\",{\"songId\":\"123\"}")+&event(9,1100,"\"setPlayingPosition\",80")))).unwrap();
@@ -618,7 +618,7 @@ mod tests{
     struct QueueFixture {root:std::path::PathBuf,path:std::path::PathBuf}
     impl QueueFixture {
         fn new(case:&str)->Self{
-            let root=std::env::temp_dir().join(format!("daozai-elog-{case}-{}",std::process::id()));
+            let root=std::env::temp_dir().join(format!("yunyu-elog-{case}-{}",std::process::id()));
             std::fs::create_dir_all(root.join("webdata/file")).unwrap();
             Self{path:root.join("cloudmusic.elog"),root}
         }

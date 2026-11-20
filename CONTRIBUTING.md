@@ -20,7 +20,7 @@ rustup run 1.100.0-x86_64-pc-windows-msvc cargo run --locked --bin yunyu
 
 日常测试用合成数据。带 `#[ignore]` 的真实账号测试和截图导出要显式运行。不要在公共 CI 里连接私人账号。
 
-发布包用 `scripts/package.ps1`，需要 NSIS 3。安装目录、程序名和数据目录都是 Yunyu／`yunyu.exe`。Rust 包名仍是 `daozai`，这样库路径 `daozai::` 保持不变。
+发布包用 `scripts/package.ps1`，需要 NSIS 3。安装目录、程序名和数据目录都是 Yunyu／`yunyu.exe`。Rust 包名和库路径都是 `yunyu`。
 
 ## 代码导航
 
@@ -39,7 +39,7 @@ rustup run 1.100.0-x86_64-pc-windows-msvc cargo run --locked --bin yunyu
 | `src/weather.rs`、`src/qweather.rs` | Open-Meteo 与和风天气 |
 | `src/native.rs`、`src/system.rs` | 原生窗口、输入、拖放和系统事件 |
 | `src/ui_tests.rs` | 无窗口的界面回归测试 |
-| `src/bin/daozai-record` | 合成数据演示和软件渲染，需要 `record` 特性 |
+| `src/bin/yunyu-record` | 合成数据演示和软件渲染，需要 `record` 特性 |
 | `vendor/` | 少量上游补丁，见依赖说明 |
 | `installer/`、`scripts/` | 安装、卸载和打包 |
 

@@ -212,7 +212,7 @@ fn health_amounts_and_time_window_support_direct_input(){
 #[ignore="按需导出健康提醒常驻的实际界面"]
 fn health_reminder_gallery(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
-    let dest=std::path::PathBuf::from(std::env::var_os("DAOZAI_FEATURE_PREVIEW_DIR").expect("需指定预览目录"));std::fs::create_dir_all(&dest).unwrap();
+    let dest=std::path::PathBuf::from(std::env::var_os("YUNYU_FEATURE_PREVIEW_DIR").expect("需指定预览目录"));std::fs::create_dir_all(&dest).unwrap();
     for dock in [crate::model::Dock::Top,crate::model::Dock::Left,crate::model::Dock::Right]{
         let mut h=due();h.app.settings.dock=dock;h.app.settings.pet=false;
         let side=dock.is_side();

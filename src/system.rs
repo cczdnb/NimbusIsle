@@ -41,7 +41,7 @@ pub struct Observation {
 /// 跨进程输入法查询和 COM 状态采样留在后台，只在状态改变时唤醒界面。
 pub fn observe(ctx:eframe::egui::Context,initial:Snapshot,input:Option<crate::input::State>)->Receiver<Observation> {
     let(tx,rx)=mpsc::sync_channel(1);
-    std::thread::Builder::new().name("daozai-system".into()).spawn(move||{
+    std::thread::Builder::new().name("yunyu-system".into()).spawn(move||{
         let mut current=Observation{system:initial,input,fullscreen:None};
         let mut delivered=None;
         let mut sampled=crate::poll_clock::PollClock::default();
@@ -352,9 +352,12 @@ pub(crate) fn is_browser_process(name:&str)->bool {
 
 fn browser_overlaps_island(browser:RECT,island:RECT,dock:crate::model::Dock)->bool {
     if dock.is_side() {return window_covers_side(browser,island,dock);}
-    // 窗口是 CANVAS_W 宽的透明画布，岛体中心固定在画布左侧 WIN_W/2 处（与水平位置、大小无关）。
-    let scale=(island.right-island.left) as f32/crate::app::CANVAS_W;
-    let center=island.left as f32+crate::app::WIN_W*scale/2.0;
+    // 窗口高度仍是 WIN_H。吉祥物坐在左端时窗口向左加宽，岛心距窗口右缘的距离不变。
+    let height=(island.bottom-island.top) as f32;
+    let width=(island.right-island.left) as f32;
+    let scale=if height>1.0 {height/crate::app::WIN_H} else {width/crate::app::CANVAS_W};
+    let gutter=((width/scale)-crate::app::CANVAS_W).max(0.0);
+    let center=island.left as f32+(gutter+crate::app::WIN_W/2.0)*scale;
     let half=crate::app::PW*scale/2.0;
     (browser.left as f32)<center+half && (browser.right as f32)>center-half
         && (browser.top as f32)<island.top as f32+crate::app::BAR_H*scale && browser.bottom>island.top
@@ -513,7 +516,7 @@ fn connect_inner(ctx:eframe::egui::Context,filter:crate::messenger::Notification
     let (tx, rx) = mpsc::sync_channel(32);
     let (stop, stopped)=mpsc::channel();
     let taskbar_mask=std::sync::Arc::new(std::sync::atomic::AtomicU8::new(mask));let worker_mask=taskbar_mask.clone();
-    std::thread::Builder::new().name("daozai-notifications".into()).spawn(move || {
+    std::thread::Builder::new().name("yunyu-notifications".into()).spawn(move || {
         let send=|event|{
             let result=tx.send(event);
             if result.is_ok(){ctx.request_repaint();}
@@ -811,7 +814,7 @@ mod tests {
             use windows::Win32::System::Ole::{OleInitialize, OleUninitialize, CF_HDROP};
             let initialized = OleInitialize(None).is_ok();
             let path =
-                std::env::temp_dir().join(format!("daozai-drag-test-{}.txt", std::process::id()));
+                std::env::temp_dir().join(format!("yunyu-drag-test-{}.txt", std::process::id()));
             std::fs::write(&path, "test").unwrap();
             {
                 let data = file_data_object(&path).unwrap();

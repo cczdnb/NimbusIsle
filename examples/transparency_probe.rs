@@ -4,7 +4,7 @@ fn main()->eframe::Result<()> {
     use eframe::egui;
     use raw_window_handle::{HasWindowHandle,RawWindowHandle};
     use windows::Win32::{Foundation::*,Graphics::Gdi::*,UI::WindowsAndMessaging::*};
-    struct Probe {native:daozai::native::Window,back:HWND,hwnd:HWND,start:std::time::Instant,checked:bool,reset:usize}
+    struct Probe {native:yunyu::native::Window,back:HWND,hwnd:HWND,start:std::time::Instant,checked:bool,reset:usize}
     impl Drop for Probe {fn drop(&mut self){unsafe{let _=DestroyWindow(self.back);}}}
     impl eframe::App for Probe {
         fn clear_color(&self,_:&egui::Visuals)->[f32;4]{[0.0;4]}
@@ -59,7 +59,7 @@ fn main()->eframe::Result<()> {
             GetWindowRect(hwnd,&mut rect).unwrap();
             CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,windows::core::w!("STATIC"),windows::core::w!(""),WS_POPUP|WS_VISIBLE|WINDOW_STYLE(6),rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,None,None,None,None).unwrap()
         };
-        let native=daozai::native::Window::new(cc).unwrap();
+        let native=yunyu::native::Window::new(cc).unwrap();
         if hidden_start {unsafe{
             use windows::Win32::Graphics::Dwm::*;
             DwmEnableBlurBehindWindow(hwnd,&DWM_BLURBEHIND{dwFlags:DWM_BB_ENABLE,..Default::default()}).unwrap();

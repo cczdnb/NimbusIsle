@@ -896,7 +896,7 @@ mod tests {
     }
     #[test]
     fn claude_local_records_do_not_restore_old_online_snapshots_or_claim_a_new_update(){
-        let path=std::env::temp_dir().join(format!("daozai-claude-cache-{}.json",std::process::id()));
+        let path=std::env::temp_dir().join(format!("yunyu-claude-cache-{}.json",std::process::id()));
         let mut config=Config::default();let id="claude-local".to_string();config.accounts.push(Account{id:id.clone(),provider:Provider::Claude,alias:"Claude".into(),source:"desktop/config.json".into(),slot:Some("fixture".into()),enabled:true,pinned:true});
         let at=chrono::Utc::now().timestamp()-3600;let snapshot=Snapshot{at,windows:vec![quota::Window{label:"5 小时".into(),seconds:Some(18000),remaining:72.0,reset:None,amount:None}],..Default::default()};
         std::fs::write(&path,serde_json::json!({&id:{"provider":"Claude","slot":"fixture","snapshot":snapshot}}).to_string()).unwrap();
@@ -906,7 +906,7 @@ mod tests {
     }
     #[test]
     fn claude_verified_history_survives_client_exit_and_island_restart(){
-        let path=std::env::temp_dir().join(format!("daozai-claude-exit-{}.json",std::process::id()));let mut config=Config::default();let id="claude-closed".to_string();config.accounts.push(Account{id:id.clone(),provider:Provider::Claude,alias:"Claude".into(),source:"desktop/config.json".into(),slot:Some("verified-owner".into()),enabled:true,pinned:true});
+        let path=std::env::temp_dir().join(format!("yunyu-claude-exit-{}.json",std::process::id()));let mut config=Config::default();let id="claude-closed".to_string();config.accounts.push(Account{id:id.clone(),provider:Provider::Claude,alias:"Claude".into(),source:"desktop/config.json".into(),slot:Some("verified-owner".into()),enabled:true,pinned:true});
         let at=chrono::Utc::now().timestamp()-60;let snapshot=Snapshot{at,windows:vec![quota::Window{label:"本周".into(),seconds:Some(604800),remaining:16.0,reset:Some(at+86400),amount:None}],..Default::default()};
         let mut state=State::restore(config.clone(),path.clone());state.receive(quota::Event{id:id.clone(),result:Ok(snapshot.clone())});state.receive(quota::Event{id:id.clone(),result:Err("客户端已关闭，等待新记录".into())});assert_eq!(state.rows[&id].as_ref().unwrap().windows,snapshot.windows);assert!(state.stale.contains_key(&id));
         let mut restarted=State::restore(config,path.clone());assert_eq!(restarted.rows[&id].as_ref().unwrap().windows,snapshot.windows);restarted.receive(quota::Event{id:id.clone(),result:Err("等待新记录".into())});assert_eq!(restarted.rows[&id].as_ref().unwrap().windows,snapshot.windows);assert_eq!(restarted.rows[&id].as_ref().unwrap().at,at);std::fs::remove_file(path).unwrap();
@@ -965,7 +965,7 @@ mod tests {
         }
     }
     #[test] fn restart_restores_last_balance_only_for_the_bound_account(){
-        let path=std::env::temp_dir().join(format!("daozai-quota-restart-{}.json",std::process::id()));
+        let path=std::env::temp_dir().join(format!("yunyu-quota-restart-{}.json",std::process::id()));
         let mut config=Config::default();
         let id=config.connect_workbuddy("fixture".into(),"测试账号".into());
         let mut state=State::restore(config.clone(),path.clone());

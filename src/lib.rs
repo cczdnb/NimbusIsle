@@ -13,6 +13,7 @@ pub mod resources;
 pub mod anim;
 pub mod hotkeys;
 pub mod sys_meter;
+mod offwork;
 pub mod oled_shift;
 pub mod app;
 pub mod messenger;
@@ -21,6 +22,7 @@ mod settings_window;
 pub mod bt;
 pub mod calendar;
 pub mod almanac;
+pub mod holidays;
 mod calendar_ui;
 mod local_calendar;
 mod calendar_editor;
@@ -47,6 +49,7 @@ pub mod otp;
 pub mod quota;
 mod quota_ui;
 pub mod weather;
+mod weather_scene;
 mod weather_ui;
 mod weather_source_ui;
 mod qweather;
@@ -56,6 +59,7 @@ pub mod agent_session;
 mod session_ui;
 mod pet;
 mod pet_expressions;
+mod pet_place;
 mod bar_layout;
 mod resident_settings;
 mod avoidance;
@@ -89,5 +93,5 @@ pub mod tray;
 #[cfg(test)]
 mod ui_tests;
 #[cfg(test)]
-#[path = "bin/daozai-record/raster.rs"]
+#[path = "bin/yunyu-record/raster.rs"]
 mod preview_raster;

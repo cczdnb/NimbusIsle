@@ -1164,7 +1164,7 @@ impl Service {
         let (cmd_tx, cmd_rx) = channel();
         let (ev_tx, ev_rx) = channel();
         let _ = std::thread::Builder::new()
-            .name("daozai-calendar".into())
+            .name("yunyu-calendar".into())
             .spawn(move || run(cmd_rx, ev_tx));
         Self { cmd: cmd_tx, ev: ev_rx }
     }
@@ -1218,7 +1218,7 @@ fn run_with(cmd_rx: Receiver<Cmd>, ev: Sender<Event>, interval: Duration, mut sy
             Ok(Cmd::Test(c, password)) => {
                 let ev = ev.clone();
                 let _ = std::thread::Builder::new()
-                    .name("daozai-calendar-test".into())
+                    .name("yunyu-calendar-test".into())
                     .spawn(move || {
                         let result = fetch(&c, &password);
                         let (ok, message, count, config) = match result {

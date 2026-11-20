@@ -1,5 +1,5 @@
 //! 灵动岛主体：状态、悬停形变、切页、顶栏与公共层。与平台无关——
-//! Windows 外壳（`main.rs`）和无窗口录制器（`daozai-record`）共用同一份代码。
+//! Windows 外壳（`main.rs`）和无窗口录制器（`yunyu-record`）共用同一份代码。
 //!
 //! 时间一律来自 `Env::t`（秒），不直接读系统时钟，所以录屏可逐帧复现。
 
@@ -439,6 +439,8 @@ pub struct FrameOut {
     /// 鼠标命中区（相对 `win` 左上角），区域外点击穿透到下层窗口。
     pub hit: Rect,
     pub notice_hit: Option<Rect>,
+    /// 岛外吉祥物的点击区。只用来挡住穿透，不参与悬停展开。
+    pub pet_hit: Option<Rect>,
     /// 文件拖入感应区；独立于普通鼠标命中区。
     pub file_drop_zone: Option<Rect>,
     /// 展开状态立即生效，不等待展开动画结束。
@@ -878,6 +880,11 @@ pub struct App {
     system_idle: Option<f64>,
     last_cursor: Option<Pos2>,
     pet_a: f32,
+    pet_flipped: bool,
+    /// 顶部落在左端时，窗口向左多出的逻辑宽度。
+    pub(crate) pet_gutter: f32,
+    pet_x: Spring,
+    pet_y: Spring,
     last_t: Option<f64>,
     pub(crate) t: f64,
     pub(crate) dt: f32,
@@ -916,6 +923,7 @@ pub struct App {
     pub(crate) resident: bar::Motion,
     pub(crate) resident_power: (Option<u8>,bool),
     pub(crate) sessions: crate::agent_session::Watch,
+    pub(crate) offwork: crate::offwork::Runtime,
 }
 
 impl App {
@@ -1033,6 +1041,10 @@ impl App {
             last_input: 0.0, system_idle: None,
             last_cursor: None,
             pet_a: 0.0,
+            pet_flipped: false,
+            pet_gutter: 0.0,
+            pet_x: Spring::new(0.0, 280.0, 0.85),
+            pet_y: Spring::new(0.0, 280.0, 0.85),
             last_t: None,
             t: 0.0,
             dt: 0.0,
@@ -1059,6 +1071,7 @@ impl App {
             updates: crate::updates::State::load(model::config_dir().join("update-check.json")),
             resident: Default::default(), resident_power:(None,false),
             sessions: crate::agent_session::Watch::default(),
+            offwork: crate::offwork::Runtime::load(),
         }
     }
 
@@ -1377,12 +1390,12 @@ impl App {
 
     /// 录制/截图用的邮件样例（只在 `record` feature 下编译）。
     ///
-    /// `DAOZAI_MAIL_DEMO=1|code` 面板带验证码，`=list` 只列邮件，`=fail` 用假授权码走一次
+    /// `YUNYU_MAIL_DEMO=1|code` 面板带验证码，`=list` 只列邮件，`=fail` 用假授权码走一次
     /// 「测试连接失败」，方便在没有真实邮箱时验收失败路径。
     #[cfg(feature = "record")]
     pub fn mail_demo(&mut self) {
         use mail::{Account, Item, Provider, Status};
-        let mode = std::env::var("DAOZAI_MAIL_DEMO").unwrap_or_default();
+        let mode = std::env::var("YUNYU_MAIL_DEMO").unwrap_or_default();
         self.settings_tab = 8;
         if mode == "fail" {
             self.mail.form.provider = Provider::Qq;
@@ -1466,11 +1479,11 @@ impl App {
 
     /// 录制/截图用的日程样例（只在 `record` feature 下编译）。
     ///
-    /// `DAOZAI_CAL_DEMO=paste|fail|connected|alert`。
+    /// `YUNYU_CAL_DEMO=paste|fail|connected|alert`。
     #[cfg(feature = "record")]
     pub fn calendar_demo(&mut self) {
         use calendar::Provider;
-        let mode = std::env::var("DAOZAI_CAL_DEMO").unwrap_or_default();
+        let mode = std::env::var("YUNYU_CAL_DEMO").unwrap_or_default();
         self.calendar.form.provider = Provider::Feishu;
         self.calendar.form.username = "demo***@feishu.example".into();
         self.settings_tab = 9;
@@ -1825,7 +1838,11 @@ impl App {
     }
 
     pub(crate) fn effective_minimal(&self)->bool {self.settings.minimal || self.browser_minimal_active}
-    pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal() && !self.side()}
+    pub fn pet_gutter(&self)->f32 {self.pet_gutter}
+    pub(crate) fn pet_visible(&self)->bool {self.settings.pet && !self.effective_minimal()}
+    /// 占常驻槽。旁置和左右贴边都不占槽。
+    pub(crate) fn pet_in_slot(&self)->bool {self.pet_visible() && !self.side() && self.settings.pet_place==model::PetPlace::Island}
+    pub(crate) fn pet_enabled(&self)->bool {self.pet_in_slot()}
     pub(crate) fn pet_space(&self)->f32 {if self.pet_enabled(){44.0}else{0.0}}
     fn lyric_focus_space(&self)->f32 {if self.pomo.running{crate::focus_bar::LYRIC_WIDTH+10.0}else{0.0}}
     fn lyric_bar_width(&self)->f32 {LYRIC_BAR_W+if self.pet_enabled(){48.0}else{0.0}+self.lyric_focus_space()}
@@ -2048,6 +2065,7 @@ impl App {
         self.fullscreen_hidden=env.fullscreen_hidden;
         self.quota_tick();
         self.weather_tick();
+        self.offwork_tick(&ctx);
         self.session_tick();
         self.current_hour=env.hour();
         self.system_idle=env.idle_seconds;
@@ -2093,7 +2111,7 @@ impl App {
         self.resident_power=(env.battery,env.charging);
         let show_music_slot=self.media.is_music()&&!bell&&!self.auto_now_playing();
         // 会话不占常驻行，挂在右侧通知上，避免把顶行撑宽后歌词对不齐。
-        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem,false);
+        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_in_slot(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem,false,self.offwork_live());
         layout.reorder(&self.settings.resident_order);
         for (position,extra) in self.quota_balance_layout(&ctx){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
@@ -2103,11 +2121,18 @@ impl App {
             layout.widen(bar::REMOTE_TODO, 6.0);
         }
         if !self.settings.show_clock {layout.hide_clock();}
-        if self.pet_enabled() {
+        if self.offwork_live() {
+            let mut baseline=layout.clone();
+            baseline.hide_slot(bar::OFFWORK);
+            let configured=crate::model::island_width_value(self.settings.island_width) as f32;
+            let cap=if configured==0.0 {baseline.width} else {configured.max(baseline.width)};
+            layout.fit_within(cap);
+        }
+        if self.pet_in_slot() {
             if let Some(a)=self.notice.as_ref().filter(|_|!self.compact_notices()&&!self.open){layout.x[bar::PET]=Some(22.0-(self.notice_size(a).0+self.pet_space())/2.0);}
             else if self.island_lyrics_active() {
                 // 吉祥物独占歌词岛左侧槽，与封面、歌词分开，演唱时仍可见。
-                let slot=if self.pet_enabled(){48.0}else{0.0};
+                let slot=48.0;
                 layout.x[bar::PET]=Some(-self.lyric_island_width()/2.0+slot/2.0);
             }
         }
@@ -2204,7 +2229,7 @@ impl App {
                         self.wheel_delta=0.0;
                         let calendar_max=if self.page==CALENDAR_PAGE {self.calendar_scroll_max(env)}else{0};
                         let session_max=if self.page==SESSION_PAGE {self.session_scroll_max()}else{0};
-                        let calendar_body=self.page==CALENDAR_PAGE && Rect::from_min_max(Pos2::new(163.0,52.0),Pos2::new(378.0,208.0)).contains(cursor);
+                        let calendar_body=self.page==CALENDAR_PAGE && Rect::from_min_max(Pos2::new(240.0,52.0),Pos2::new(400.0,208.0)).contains(cursor);
                         let clipboard_tab=self.page==3 && self.shelf_tab==1;
                         let clipboard_body=clipboard_tab && Rect::from_min_max(Pos2::new(42.0,31.0),Pos2::new(377.0,124.0)).contains(cursor);
                         let list=match self.page {
@@ -2237,6 +2262,7 @@ impl App {
         let volume_dragging=self.music_volume_open && ctx.is_being_dragged(egui::Id::new(("card-drag",true,"m-volume-track")));
         let want = (inside && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || volume_dragging || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
+        self.place_pet(win, env, dt);
         self.update_pet(env, cx);
 
         // ---------- 绘制 ----------
@@ -2399,13 +2425,16 @@ impl App {
             if ctx.input(|i|i.pointer.any_pressed()&&i.pointer.interact_pos().is_some_and(|p|!rect.contains(p)&&!notice_rect.is_some_and(|r|r.contains(p)))){self.notice_details=false;}
         }
         let pet_alpha=self.pet_a*(1.0-smoothstep(0.0,0.3,pc));
-        if pet_alpha>0.004 && !minimal_pill {
-            // 播放中加高后吉祥物仍贴在原来的顶行，不要被垂直居中拉到两行中间。
-            let y=if self.auto_now_playing() && p < 0.2 {0.0} else {(h.min(self.base_size().1)-BAR_H).max(0.0)/2.0};
-            // 吉祥物跟随皮肤换色：浅色底上变成深色版本，保持清晰。
-            let fit=if self.island_lyrics_active()||self.notice.is_some(){1.0}else{((WIN_W-32.0)/self.resident.target.width).min(1.0)};
-            self.pet.draw(&base.scaled(cx-origin.x,15.0,fit).shifted(0.0,y).faded(pet_alpha),cx-origin.x+self.resident.position(bar::PET),self.t,self.skin_palette());
-        }
+        let pet_sprite=if pet_alpha>0.004 && !minimal_pill {
+            if self.pet_in_slot() {
+                // 播放中加高后吉祥物仍贴在原来的顶行，不要被垂直居中拉到两行中间。
+                let y=if self.auto_now_playing() && p < 0.2 {0.0} else {(h.min(self.base_size().1)-BAR_H).max(0.0)/2.0};
+                // 吉祥物跟随皮肤换色：浅色底上变成深色版本，保持清晰。
+                let fit=if self.island_lyrics_active()||self.notice.is_some(){1.0}else{((WIN_W-32.0)/self.resident.target.width).min(1.0)};
+                self.pet.draw(&base.scaled(cx-origin.x,15.0,fit).shifted(0.0,y).faded(pet_alpha),cx-origin.x+self.resident.position(bar::PET),self.t,self.skin_palette());
+                None
+            } else {self.draw_beside_pet(ui,pet_alpha)}
+        } else {None};
         if reveal > 0.004 && !banner && !nudge_banner && !restoring_lyrics {
             let c = base.shifted(0.0, (1.0 - reveal) * -5.0).faded(reveal);
             let c = if reveal < 0.6 { c.ghost() } else { c };
@@ -2429,7 +2458,8 @@ impl App {
         if self.calendar.draft.is_some() && reveal>0.9 {self.calendar_editor_inputs(ui,origin,&mut cmds);}
 
         // ---------- 输出 ----------
-        let rel = |r: Rect| r.translate(-win.min.to_vec2());
+        // 坐标相对窗口原点。`win` 可能因左侧吉祥物边距右移，不能再减 `win.min`。
+        let rel = |r: Rect| r.translate(-ui.max_rect().min.to_vec2());
         let mut region = if side {
             // 侧边：面板从边缘滑出，区域包含肩部（沿边缘上下）与外侧阴影，并一直延伸到屏幕边缘。
             let r=if p > 0.02 || self.open {
@@ -2453,6 +2483,7 @@ impl App {
         if let Some(r)=messenger_rect{region=region.union(r.expand(5.0));}
         if self.auto_now_playing() && !side {region=region.union(body.expand(4.0));}
         if let Some(rect)=notice_shape {region=region.union(rect.expand2(Vec2::new(12.0,8.0)));}
+        if let Some(rect)=pet_sprite {region=region.union(rect.expand(4.0));}
         if let Some(rect)=notice_details {region=region.union(rect.expand(12.0));}
         // 胶囊上方留空的那一小条也要在窗口区域内，阴影才不会被截断。
         if pill && !side {region.min.y=region.min.y.min(win.top());}
@@ -2485,6 +2516,7 @@ impl App {
                 shapes.push(GlassShape::Round(rel(r),radius));
             }
             if let Some(r)=floating_toast {shapes.push(GlassShape::Round(rel(r),11.0));}
+            if let Some(r)=pet_sprite {shapes.push(GlassShape::Round(rel(r),r.height().min(r.width())*0.5));}
             shapes.extend(tooltips.iter().map(|r|GlassShape::Round(rel(*r),6.0)));
             shapes
         });
@@ -2499,6 +2531,7 @@ impl App {
             || (self.drag_a > 0.001 && self.drag_a < 0.999)
             || self.drag_hot
             || (self.pet_a > 0.001 && self.pet_a < 0.999)
+            || !self.pet_x.settled(100.0) || !self.pet_y.settled(100.0)
             || !self.resident.settled()
             || self.open && self.page==3 && self.shelf_x.values().any(|s| !s.settled(68.0))
             || self.open && self.page==2 && (!self.water_ring.settled(1.0) || !self.sit_view_t.settled(1.0) || !self.sit_t.settled(1.0))
@@ -2525,6 +2558,7 @@ impl App {
                 under.map_or(hit,|under|hit.union(under))
             }),
             notice_hit:notice_shape.into_iter().chain(notice_details).chain(messenger_rect).chain(self.shelf_menu_rect).reduce(|a,b|a.union(b)).map(rel),
+            pet_hit:pet_sprite.map(rel),
             file_drop_zone:self.settings.visible_pages[3].then(||rel(if side {self.island_rect(win,PW,self.expanded_height())} else {Rect::from_min_size(Pos2::new(cx-PW/2.0,top),Vec2::new(PW,96.0))})),
             expanded: self.open,
             editing: self.is_editing(),
@@ -3307,7 +3341,7 @@ impl App {
             let content_width=self.lyric_island_width()-self.lyric_focus_space();
             let width=self.w.pos.max(content_width);
             let left=local_cx-width/2.0;
-            let pet_slot=if self.pet_enabled(){48.0}else{0.0};
+            let pet_slot=if self.pet_in_slot(){48.0}else{0.0};
             let music_left=left+pet_slot;
             let music_w=(content_width-pet_slot).max(LYRIC_BAR_W.min(content_width));
             let center_y=self.island_lyric_bar_height()/2.0;
@@ -3495,6 +3529,9 @@ impl App {
                 let value=crate::sys_meter::current().map(|reading|reading.mem).unwrap_or(f32::NAN);
                 self.draw_meter(&c,local_cx+x,&layout,bar::MEM,"RAM",value);
             }
+            if let Some(x)=layout.x[bar::OFFWORK] {
+                self.paint_offwork(&c,local_cx+x,layout.widths[bar::OFFWORK],layout.pet_clearance(bar::OFFWORK),true);
+            }
             if self.settings.show_cpu || self.settings.show_mem {
                 c.ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
             }
@@ -3525,17 +3562,56 @@ impl App {
         if reveal>0.004 {self.shared_header(&base.faded(reveal),base.origin.x+PW/2.0,1.0,reveal,env);}
     }
 
+    fn place_pet(&mut self, win: Rect, env: &Env, dt: f32) {
+        if !self.pet_visible() || self.pet_in_slot() {
+            self.pet_gutter=0.0;
+            self.pet_x.snap(self.pet_x.pos);
+            self.pet_y.snap(self.pet_y.pos);
+            return;
+        }
+        let (bw,bh)=self.base_size();
+        let island=self.island_rect(win,bw,bh);
+        let panel=self.island_rect(win,PW,self.expanded_height());
+        let work=env.screen.unwrap_or(Rect::from_min_max(Pos2::new(-1.0e5,-1.0e5),Pos2::new(1.0e5,1.0e5)));
+        let notice=if self.dock()==model::Dock::Top {self.notice_rect(win.center().x,island.top())}else{None};
+        let spot=crate::pet_place::resolve(self.dock(),self.settings.pet_place,island,panel,self.open||self.progress()>0.04,work,notice,self.pet_flipped);
+        self.pet_flipped=spot.flipped;
+        let animate=self.pet_x.target!=0.0 || self.pet_y.target!=0.0;
+        if !animate || !bar::animations_enabled() {
+            self.pet_x.snap(spot.center.x);
+            self.pet_y.snap(spot.center.y);
+        } else {
+            self.pet_x.target=spot.center.x;
+            self.pet_y.target=spot.center.y;
+            self.pet_x.step(dt);
+            self.pet_y.step(dt);
+        }
+        self.pet_gutter=crate::pet_place::gutter(self.dock(),spot.center,island,bw);
+    }
+    fn draw_beside_pet(&mut self, ui: &egui::Ui, alpha: f32) -> Option<Rect> {
+        let scale=self.settings.island_scale();
+        let center=Pos2::new(self.pet_x.pos,self.pet_y.pos);
+        let rect=Rect::from_center_size(center,Vec2::new(crate::pet_place::SPRITE_W*scale,crate::pet_place::SPRITE_H*scale));
+        let card=Card::new(ui,Pos2::new(center.x-24.0,center.y-15.0),ui.max_rect()).scaled(24.0,15.0,scale).faded(alpha);
+        self.pet.draw(&card,24.0,self.t,self.skin_palette());
+        Some(rect)
+    }
     fn update_pet(&mut self, env: &Env, cx: f32) {
-        let cx=cx+self.resident.position(bar::PET);
+        let beside=!self.pet_in_slot() && self.pet_visible();
+        let anchor=if beside {Pos2::new(self.pet_x.pos,self.pet_y.pos)}else{Pos2::new(cx+self.resident.position(bar::PET),15.0)};
         let idle = self.idle_for();
         if self.pet.last_idle >= self.opts.pet_idle && idle < 1.0
             && matches!(self.pet.state, PetState::Dozing | PetState::Sleeping) {
             self.pet.waking_until = self.t + 2.2;
         }
         self.pet.last_idle = idle;
-        self.pet.hovered = env.cursor.is_some_and(|p| (p.x-cx).abs() <= BAR_W/2.0+24.0 && (0.0..70.0).contains(&p.y));
+        self.pet.hovered = env.cursor.is_some_and(|p| if beside {
+            (p.x-anchor.x).abs()<=28.0 && (p.y-anchor.y).abs()<=20.0
+        } else {
+            (p.x-anchor.x).abs() <= BAR_W/2.0+24.0 && (0.0..70.0).contains(&p.y)
+        });
         self.pet.worried = self.settings.show_battery && env.battery.is_some_and(|v|v<=20) && !env.charging || env.network == Some(false);
-        let allowed = self.pet_enabled();
+        let allowed = self.pet_visible();
         if !allowed { self.pet.reaction = None; self.pet.waking_until = 0.0; self.pet.expressions.clear(); }
         let available = allowed && !self.open && !self.drag_hot;
         let shown = available;
@@ -3543,7 +3619,7 @@ impl App {
         let visible = available && self.pet_a > 0.7 && self.progress() < 0.1;
         self.pet.advance(self.dt, visible);
         let state = self.pet_state();
-        let gaze = env.cursor.map(|p| [((p.x-cx)/28.0).clamp(-3.0,3.0), ((p.y-15.0)/40.0).clamp(-1.0,1.5)])
+        let gaze = env.cursor.map(|p| [((p.x-anchor.x)/28.0).clamp(-3.0,3.0), ((p.y-anchor.y)/40.0).clamp(-1.0,1.5)])
             .unwrap_or([(self.t as f32 * 0.35).sin()*0.8, 0.0]);
         self.pet.step(state, self.t, self.dt, gaze, visible);
     }

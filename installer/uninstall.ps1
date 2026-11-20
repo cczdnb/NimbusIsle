@@ -11,7 +11,7 @@ foreach($path in $links){if((Test-Path -LiteralPath $path) -and $shell.CreateSho
 $runKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 Remove-ItemProperty -Path $runKey -Name Yunyu -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Yunyu' -ErrorAction SilentlyContinue
-foreach($name in @('yunyu.exe','yunyu-previous.exe','daozai-v0.2-backup.exe','THIRD_PARTY_NOTICES.txt','LICENSE','uninstall.ps1','收集云屿诊断.cmd','scripts\collect-diagnostics.ps1')){
+foreach($name in @('yunyu.exe','yunyu-previous.exe','THIRD_PARTY_NOTICES.txt','LICENSE','uninstall.ps1','收集云屿诊断.cmd','scripts\collect-diagnostics.ps1')){
     $path=Join-Path $installDir $name;if(Test-Path -LiteralPath $path){Remove-Item -LiteralPath $path}
 }
 $tools=Join-Path $installDir 'scripts'

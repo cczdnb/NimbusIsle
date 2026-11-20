@@ -111,7 +111,7 @@ fn load_resource_icon() -> Option<HICON> {
 
 /// 图标取不到时，直接解析内嵌的云屿 ICO。
 fn load_embedded_icon() -> Option<HICON> {
-    let ico: &[u8] = include_bytes!("../assets/daozai.ico");
+    let ico: &[u8] = include_bytes!("../assets/yunyu.ico");
     if ico.len() < 6 {
         return None;
     }
@@ -238,7 +238,7 @@ fn about() {
 }
 
 fn dump_menu(hwnd: HWND, ctx: &Ctx, menu: HMENU) {
-    if let Ok(path) = std::env::var("DAOZAI_TRAY_DUMP") {
+    if let Ok(path) = std::env::var("YUNYU_TRAY_DUMP") {
         let state = ctx.state();
         let mut body = String::new();
         body.push_str(&format!("hwnd=0x{:X}\n", hwnd.0 as usize));
@@ -381,7 +381,7 @@ impl Tray {
         let (ready_tx, ready_rx) = channel();
         let thread_state = shared.clone();
         let thread = std::thread::Builder::new()
-            .name("daozai-tray".into())
+            .name("yunyu-tray".into())
             .spawn(move || unsafe {
                 let Ok(module) = GetModuleHandleW(None) else {
                     let _ = ready_tx.send(Err("GetModuleHandleW 失败".to_string()));
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn embedded_icon_still_parsable_as_fallback() {
-        let ico: &[u8] = include_bytes!("../assets/daozai.ico");
+        let ico: &[u8] = include_bytes!("../assets/yunyu.ico");
         assert_eq!(&ico[..4], &[0, 0, 1, 0]);
         assert!(load_embedded_icon().is_some());
     }

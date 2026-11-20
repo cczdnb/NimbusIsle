@@ -1,14 +1,14 @@
 use crate::{bar_layout::*,paint::{self,Card,H},theme::{self,W}};
 use eframe::egui::{self,Color32,RichText,Rect,Pos2,Vec2};
 
-pub(crate) fn preview_layout(order:&[usize],quotas:usize)->Layout {
-    let mut layout=Layout::new(true,quotas.max(1),true,true,false,true,true,true,true,true,false);
+pub(crate) fn preview_layout(order:&[usize],quotas:usize,pet:bool)->Layout {
+    let mut layout=Layout::new(true,quotas.max(1),true,true,false,pet,true,true,true,true,false,true);
     layout.reorder(order);layout
 }
 
 impl crate::app::App {
     pub(crate) fn resident_order_settings(&mut self,ui:&mut egui::Ui){
-        let default=if self.settings.show_battery {DEFAULT_ORDER.to_vec()}else{vec![QUOTA,PET,CLOCK,WEATHER,BATTERY,MUSIC,FOCUS,REMOTE_TODO,CPU,MEM,SESSION]};
+        let default=if self.settings.show_battery {DEFAULT_ORDER.to_vec()}else{vec![QUOTA,PET,CLOCK,WEATHER,OFFWORK,BATTERY,MUSIC,FOCUS,REMOTE_TODO,CPU,MEM,SESSION]};
         let mut order=if valid_order(&self.settings.resident_order){self.settings.resident_order.clone()}else{default.clone()};
         ui.horizontal(|ui|{
             ui.label(RichText::new("拖动岛上的图标").color(ui.visuals().text_color()));
@@ -19,7 +19,7 @@ impl crate::app::App {
         ui.add_space(12.0);
         let indices=self.quota_bar_indices();let count=indices.len();
         let weather_snapshot=self.weather_pill().cloned();
-        let mut layout=preview_layout(&order,count);
+        let mut layout=preview_layout(&order,count,self.settings.pet && self.settings.pet_place==crate::model::PetPlace::Island);
         for (position,extra) in self.quota_balance_layout(ui.ctx()){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
         if self.settings.clock_seconds { layout.widen_clock(24.0); }
@@ -49,11 +49,11 @@ impl crate::app::App {
         let pointer=ui.ctx().pointer_interact_pos();
         let dragged=egui::DragAndDrop::payload::<usize>(ui.ctx());
         let mut movement=None;
-        let label=|slot|match slot{CLOCK=>"时间",BATTERY=>"电量",WEATHER=>"天气",QUOTA=>"AI 额度",MUSIC=>"音乐",FOCUS=>"专注",REMOTE_TODO=>"待办提醒",CPU=>"CPU",MEM=>"内存",SESSION=>"会话",_=>"吉祥物"};
+        let label=|slot|match slot{CLOCK=>"时间",BATTERY=>"电量",WEATHER=>"天气",QUOTA=>"AI 额度",MUSIC=>"音乐",FOCUS=>"专注",REMOTE_TODO=>"待办提醒",CPU=>"CPU",MEM=>"内存",SESSION=>"会话",OFFWORK=>"下班",_=>"吉祥物"};
         for (index,&slot) in order.iter().enumerate(){
             let Some(slot_x)=layout.x.get(slot).copied().flatten() else {continue};
             let x=cx+slot_x;
-            let width=match slot{CLOCK=>layout.widths[CLOCK],BATTERY=>20.0,WEATHER=>layout.widths[WEATHER],PET=>32.0,MUSIC=>14.0,FOCUS=>crate::focus_bar::WIDTH,REMOTE_TODO=>layout.widths[REMOTE_TODO],CPU=>layout.widths[CPU],MEM=>layout.widths[MEM],SESSION=>layout.widths[SESSION],_=>{
+            let width=match slot{CLOCK=>layout.widths[CLOCK],BATTERY=>20.0,WEATHER=>layout.widths[WEATHER],PET=>32.0,MUSIC=>14.0,FOCUS=>crate::focus_bar::WIDTH,REMOTE_TODO=>layout.widths[REMOTE_TODO],CPU=>layout.widths[CPU],MEM=>layout.widths[MEM],SESSION=>layout.widths[SESSION],OFFWORK=>layout.widths[OFFWORK],_=>{
                 let left=layout.quota_slots().filter_map(|i|layout.x[i].map(|x|x-layout.widths[i]/2.0)).fold(f32::INFINITY,f32::min);
                 let right=layout.quota_slots().filter_map(|i|layout.x[i].map(|x|x+layout.widths[i]/2.0)).fold(f32::NEG_INFINITY,f32::max);
                 right-left
@@ -69,7 +69,7 @@ impl crate::app::App {
             let dx=if is_dragged{pointer.map(|p|((p.x-origin.x)/scale-(left+width/2.0)).clamp(-left,layout.width-left-width)).unwrap_or(0.0)}else{0.0};
             if is_dragged {ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);}
             else if response.hovered(){ui.painter().rect_filled(rect,6.0,Color32::from_white_alpha(18));}
-            let active=match slot{CLOCK=>self.settings.show_clock,BATTERY=>self.settings.show_battery&&self.resident_power.0.is_some(),WEATHER=>weather_snapshot.is_some(),PET=>self.settings.pet,QUOTA=>count>0,MUSIC=>self.media.is_music(),FOCUS=>self.pomo.running,REMOTE_TODO=>self.nudge_icon_visible(),CPU=>self.settings.show_cpu,MEM=>self.settings.show_mem,SESSION=>self.session_mark_visible(),_=>true};
+            let active=match slot{CLOCK=>self.settings.show_clock,BATTERY=>self.settings.show_battery&&self.resident_power.0.is_some(),WEATHER=>weather_snapshot.is_some(),PET=>self.settings.pet,QUOTA=>count>0,MUSIC=>self.media.is_music(),FOCUS=>self.pomo.running,REMOTE_TODO=>self.nudge_icon_visible(),CPU=>self.settings.show_cpu,MEM=>self.settings.show_mem,SESSION=>self.session_mark_visible(),OFFWORK=>self.offwork_live(),_=>true};
             let c=card.shifted(dx,0.0).faded(if active||is_dragged{1.0}else{0.38}).ghost();
             match slot{
                 BATTERY=>paint::battery(&c,x,15.0,self.resident_power.0,self.resident_power.1,1.0),
@@ -85,6 +85,7 @@ impl crate::app::App {
                 SESSION=>self.draw_session_mark(&c,x,15.0,false),
                 CPU=>self.draw_meter(&c,x,&layout,CPU,"CPU",crate::sys_meter::current().map(|reading|reading.cpu).unwrap_or(f32::NAN)),
                 MEM=>self.draw_meter(&c,x,&layout,MEM,"RAM",crate::sys_meter::current().map(|reading|reading.mem).unwrap_or(f32::NAN)),
+                OFFWORK=>self.paint_offwork(&c,x,layout.widths[OFFWORK],1.0,false),
                 QUOTA if count>0=>self.draw_quota_bar(&c,cx,&layout),
                 _=>{c.ring(x,15.0,10.0,2.0,theme::GRAY);c.text(x,18.0,"AI",7.0,W::Bold,theme::WHITE,H::Center);},
             }

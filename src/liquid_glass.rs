@@ -139,7 +139,7 @@ impl Engine {
         self.inflight = true;
         let request = req.clone();
         std::thread::Builder::new()
-            .name("daozai-liquid-glass".into())
+            .name("yunyu-liquid-glass".into())
             .spawn(move || {
                 let start = Instant::now();
                 let result = compose_from_request(&request);

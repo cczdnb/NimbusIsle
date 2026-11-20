@@ -34,16 +34,16 @@ fn launch_compatible(options:eframe::NativeOptions,launch:&mut impl FnMut(eframe
     }
 }
 
-/// 验收与排障：设置环境变量 `DAOZAI_RENDERER=wgpu` 直接使用兼容图形后端，
+/// 验收与排障：设置环境变量 `YUNYU_RENDERER=wgpu` 直接使用兼容图形后端，
 /// 在正常电脑上也能检查 OpenGL 失败后用户会看到的画面。
 fn forced_compatible()->bool {
-    std::env::var("DAOZAI_RENDERER").is_ok_and(|value|value.trim().eq_ignore_ascii_case("wgpu"))
+    std::env::var("YUNYU_RENDERER").is_ok_and(|value|value.trim().eq_ignore_ascii_case("wgpu"))
 }
 
 pub fn run(options:eframe::NativeOptions,launch:impl FnMut(eframe::NativeOptions)->eframe::Result<()>)->eframe::Result<()> {
     // 上次崩在显卡 OpenGL 驱动里时，崩溃处理留下的标记会在这里转成设置。
-    let _=daozai::renderer::apply_pending_fallback();
-    run_with(forced_compatible() || daozai::renderer::compat_requested(),options,launch)
+    let _=yunyu::renderer::apply_pending_fallback();
+    run_with(forced_compatible() || yunyu::renderer::compat_requested(),options,launch)
 }
 
 fn opengl(mut options:eframe::NativeOptions)->eframe::NativeOptions { options.renderer=eframe::Renderer::Glow; options }
@@ -52,12 +52,12 @@ fn run_with(compat_first:bool,options:eframe::NativeOptions,mut launch:impl FnMu
     if compat_first {
         // 兼容渲染是被要求的（设置、崩溃标记或环境变量），但这台电脑可能根本没有 DX12 / Vulkan 设备
         // （远程桌面、虚拟机、只有基本显示适配器、老显卡）。这时退回 OpenGL，不让用户每次都打不开。
-        daozai::renderer::set_compat_active(true);
+        yunyu::renderer::set_compat_active(true);
         let error=match launch_compatible(options.clone(),&mut launch) {
             Err(error @ eframe::Error::Wgpu(_))=>error,
             result=>return result,
         };
-        daozai::renderer::set_compat_active(false);
+        yunyu::renderer::set_compat_active(false);
         return launch(opengl(options)).map_err(|fallback|eframe::Error::AppCreation(format!(
             "兼容图形后端无法启动：{error}\nOpenGL 也无法启动：{fallback}\n请安装电脑厂商提供的显卡驱动后重试。"
         ).into()));
@@ -69,7 +69,7 @@ fn run_with(compat_first:bool,options:eframe::NativeOptions,mut launch:impl FnMu
         Err(error @ (eframe::Error::OpenGL(_)|eframe::Error::Glutin(_)|eframe::Error::NoGlutinConfigs(..)))=>error,
         Err(error)=>return Err(error),
     };
-    daozai::renderer::set_compat_active(true);
+    yunyu::renderer::set_compat_active(true);
     launch_compatible(fallback_options,&mut launch).map_err(|fallback|eframe::Error::AppCreation(format!(
         "OpenGL 初始化失败：{error}\n兼容图形后端也无法启动：{fallback}\n请安装电脑厂商提供的显卡驱动后重试。"
     ).into()))

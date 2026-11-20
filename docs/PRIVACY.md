@@ -18,8 +18,6 @@
 
 会话页只读本机已有的 Agent 记录，用来显示标题和状态，不上传，也不把整段对话放进岛上。在原来的软件里把会话标成已读，云屿不会因此把它撤下，也不会把这个状态写回去。读取位置是：Cursor 的 `%APPDATA%\Cursor` 与用户目录下的 `.cursor`，Claude 的 `.claude`，Codex 的 `.codex`，WorkBuddy 的 `.workbuddy`，DeepSeek 的 `.dsh`，Antigravity 的 `.gemini\antigravity`。在 **设置 → 会话** 里关掉某一家后，不再读它。
 
-从原版岛仔的 `%APPDATA%\Daozai` 换过来时，如果 Yunyu 目录还不存在，会复制一份过去。原目录保留。Windows 凭据管理器里的旧密码和令牌不会复制，需要在云屿里重新连接。
-
 ## 凭据放在哪里
 
 邮箱密码、日历密码、API Key，以及 Jira、Linear、GitHub、Notion、飞书、自建 JSON 的待办令牌，保存在 Windows 凭据管理器。待办这项的服务名是 `Yunyu.TodoSync`。
@@ -37,6 +35,8 @@ Gemini、豆包的网页会话，以及 WorkBuddy 的独立会话，用当前 Wi
 工作日历按你填写的地址访问 CalDAV 或 Exchange ActiveSync。Windows 上使用系统的 TLS 和证书信任库，并校验证书有效期和服务器名称。自签证书需要先放进 Windows 的信任库。日历诊断只记服务类型、同步范围、错误类别和数量，不记服务器地址、凭据或日程正文。
 
 第三方待办只连接你选中的那一个来源：Jira、Linear、GitHub、Notion、飞书、微软待办或你填写的 JSON 地址。请求带上对应令牌。失败时保留上一份列表。Jira、Linear、GitHub、Notion 和 Windows 待办在你勾选完成时可以写回；飞书和自建 JSON 只读取。
+
+下班倒计时不联网。下班钟点在本机设置里。
 
 天气有两个来源，同一时间只用你选中的那个。
 

@@ -157,7 +157,7 @@ mod tests{
     struct Fixture(PathBuf);
     impl Fixture{
         fn new(root:&Value)->Self{
-            let dir=std::env::temp_dir().join(format!("daozai-zcode-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));
+            let dir=std::env::temp_dir().join(format!("yunyu-zcode-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));
             std::fs::create_dir(&dir).unwrap();let fixture=Self(dir.join("credentials.json"));
             std::fs::write(&fixture.0,root.to_string()).unwrap();std::fs::write(fixture.0.with_file_name("telemetry-state.json"),r#"{"deviceMid":"synthetic-device"}"#).unwrap();fixture
         }
@@ -226,7 +226,7 @@ mod tests{
     }
     #[cfg(windows)]
     #[test]fn system_credentials_are_read_without_changing_other_accounts_or_the_store(){
-        let dir=std::env::temp_dir().join(format!("daozai-zcode-v2-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));
+        let dir=std::env::temp_dir().join(format!("yunyu-zcode-v2-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));
         std::fs::create_dir(&dir).unwrap();let path=dir.join("credentials.json");
         let identity:String=digest::digest(&digest::SHA256,path.to_str().unwrap().as_bytes()).as_ref().iter().map(|b|format!("{b:02x}")).collect();
         let entry=keyring::Entry::new("ZCode Credential Encryption",&identity).unwrap();

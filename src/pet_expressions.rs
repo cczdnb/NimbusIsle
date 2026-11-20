@@ -1,5 +1,5 @@
 //! 云屿表情：按场景播放，隐藏时暂停，日常动作之间留出安静时间。
-//! 每个表情单独一张 144×1440 的序列图（16 帧 × 3 倍密度），只解码、上传正在播放的那一张，播完即释放。
+//! 每个表情单独一张 144×1350 的序列图（15 帧 × 3 倍密度），只解码、上传正在播放的那一张，播完即释放。
 use crate::pet::PetState;
 use crate::paint::Card;
 use crate::skin_paint::Palette;
@@ -14,9 +14,9 @@ pub(crate) enum Expression {
 impl Expression {
     pub const ALL:[Self;12]=[Self::Wink,Self::Smug,Self::Blush,Self::Delighted,Self::SideGlance,Self::Praised,
         Self::Heart,Self::Giggle,Self::ShyPeek,Self::Scan,Self::Peek,Self::Search];
-    fn times(self)->[f32;16] {
-        if self as usize>=9 {[0.35,0.13,0.15,0.18,0.35,0.28,0.16,0.11,0.11,0.16,0.35,0.28,0.16,0.14,0.20,0.35]}
-        else {[0.35,0.12,0.12,0.12,0.13,0.13,0.14,0.40,0.18,0.14,0.12,0.12,0.12,0.14,0.14,0.45]}
+    fn times(self)->[f32;15] {
+        if self as usize>=9 {[0.35,0.13,0.15,0.18,0.35,0.28,0.16,0.11,0.11,0.16,0.35,0.28,0.16,0.14,0.20]}
+        else {[0.35,0.12,0.12,0.12,0.13,0.13,0.14,0.40,0.18,0.14,0.12,0.12,0.12,0.14,0.14]}
     }
     pub fn duration(self)->f32 {self.times().iter().sum()}
     /// 由 `assets/pet/expressions.png` 按列拆出，顺序与 `ALL` 一致。
@@ -34,7 +34,7 @@ impl Expression {
     fn frame(self,time:f32)->usize {
         let mut end=0.0;
         for (index,seconds) in self.times().into_iter().enumerate() {end+=seconds;if time<end{return index;}}
-        15
+        14
     }
 }
 
@@ -46,10 +46,22 @@ pub(crate) struct Expressions {
     next:[usize;4],
     /// 正在播放的表情序列图；换表情或换皮肤时原地替换内容，播完释放。
     sheet:Option<(Expression,Option<Palette>,TextureHandle)>,
+    /// 没有表情在播时，常驻显示的那张设计稿。
+    rest:Option<TextureHandle>,
+    /// 听歌时循环的 15 帧唱歌图，和 12 个表情分开加载。
+    sing:Option<TextureHandle>,
+}
+
+pub const SING_FRAME_SECS:f32=0.1;
+
+/// 唱歌序列的帧号。系统关闭动画时停在张嘴的中间帧。
+pub fn sing_frame(age:f32)->usize {
+    if !crate::bar_layout::animations_enabled() {7}
+    else {(age.max(0.0)/SING_FRAME_SECS).floor() as usize%15}
 }
 
 impl Default for Expressions {
-    fn default()->Self {Self{clip:None,wait:8.0,cooldown:0.0,hovered:false,next:[0;4],sheet:None}}
+    fn default()->Self {Self{clip:None,wait:8.0,cooldown:0.0,hovered:false,next:[0;4],sheet:None,rest:None,sing:None}}
 }
 
 impl Expressions {
@@ -92,21 +104,45 @@ impl Expressions {
     }
     pub fn draw(&mut self,c:&Card,cx:f32,palette:Option<Palette>)->bool {
         let Some((expression,time))=self.clip else{return false;};
-        if self.sheet.as_ref().is_none_or(|(previous,previous_palette,_)|(*previous,*previous_palette)!=(expression,palette)) {
+        if self.sheet.as_ref().is_none_or(|(previous,_,_)| *previous!=expression) {
             let decoded=image::load_from_memory(expression.sheet()).expect("内置表情序列图").into_rgba8();
-            let mut image=egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize,decoded.height() as usize],decoded.as_raw());
+            let image=egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize,decoded.height() as usize],decoded.as_raw());
             drop(decoded);
-            if let Some(palette)=palette {for pixel in &mut image.pixels {if pixel.a()>0 {*pixel=crate::skin_paint::map_color(*pixel,&palette);}}}
             if let Some((previous,previous_palette,texture))=&mut self.sheet {*previous=expression;*previous_palette=palette;texture.set(image,egui::TextureOptions::LINEAR);}
             else {
-                let texture=c.ui.ctx().load_texture("daozai-expressions",image,egui::TextureOptions::LINEAR);
+                let texture=c.ui.ctx().load_texture("yunyu-expressions",image,egui::TextureOptions::LINEAR);
                 crate::skin_paint::mark_colored(texture.id());self.sheet=Some((expression,palette,texture));
             }
         }
         let frame=if crate::bar_layout::animations_enabled(){expression.frame(time)}else{7};
-        let uv=Rect::from_min_max(egui::pos2(0.0,frame as f32/16.0),egui::pos2(1.0,(frame+1) as f32/16.0));
+        let uv=Rect::from_min_max(egui::pos2(0.0,frame as f32/15.0),egui::pos2(1.0,(frame+1) as f32/15.0));
         c.painter.image(self.sheet.as_ref().unwrap().2.id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
         true
+    }
+    /// 待机、专注、睡觉这些没有序列在播的时候，显示设计稿里睁眼的那一帧。
+    pub fn draw_rest(&mut self,c:&Card,cx:f32) {
+        if self.rest.is_none() {
+            let decoded=image::load_from_memory(Expression::Wink.sheet()).expect("内置吉祥物").into_rgba8();
+            let frame=image::imageops::crop_imm(&decoded,0,0,144,90).to_image();
+            let image=egui::ColorImage::from_rgba_unmultiplied([frame.width() as usize,frame.height() as usize],frame.as_raw());
+            let texture=c.ui.ctx().load_texture("yunyu-mascot",image,egui::TextureOptions::LINEAR);
+            crate::skin_paint::mark_colored(texture.id());
+            self.rest=Some(texture);
+        }
+        c.painter.image(self.rest.as_ref().unwrap().id(),c.rect(cx-24.0,0.0,48.0,30.0),Rect::from_min_max(egui::pos2(0.0,0.0),egui::pos2(1.0,1.0)),Color32::WHITE);
+    }
+    /// 听歌且没有插入表情时，循环播放唱歌序列。
+    pub fn draw_sing(&mut self,c:&Card,cx:f32,age:f32) {
+        if self.sing.is_none() {
+            let decoded=image::load_from_memory(include_bytes!("../assets/pet/expressions/12-sing.png")).expect("唱歌序列图").into_rgba8();
+            let image=egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize,decoded.height() as usize],decoded.as_raw());
+            let texture=c.ui.ctx().load_texture("yunyu-sing",image,egui::TextureOptions::LINEAR);
+            crate::skin_paint::mark_colored(texture.id());
+            self.sing=Some(texture);
+        }
+        let frame=sing_frame(age);
+        let uv=Rect::from_min_max(egui::pos2(0.0,frame as f32/15.0),egui::pos2(1.0,(frame+1) as f32/15.0));
+        c.painter.image(self.sing.as_ref().unwrap().id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
     }
 }
 
@@ -171,15 +207,15 @@ mod tests {
     fn sheets_keep_alpha_and_the_looking_eyes_really_move(){
         for expression in Expression::ALL {
             let image=image::load_from_memory(expression.sheet()).unwrap().into_rgba8();
-            assert_eq!(image.dimensions(),(144,1440),"每张序列图 16 帧、保持 3 倍密度");assert_eq!(image.get_pixel(0,0).0[3],0);
+            assert_eq!(image.dimensions(),(144,1350),"每张序列图 15 帧、保持 3 倍密度");assert_eq!(image.get_pixel(0,0).0[3],0);
             let mut centers=Vec::new();
-            for frame in 0..16 {
+            for frame in 0..15 {
                 let mut xs=Vec::new();
                 for y in 0..90 {for x in 0..144 {if image.get_pixel(x,frame*90+y).0[3]>150 {xs.push(x as f32/3.0);}}}
                 assert!(!xs.is_empty());centers.push(xs.iter().sum::<f32>()/xs.len() as f32);
             }
-            if expression as usize>=9 {assert!(centers.iter().copied().fold(f32::NEG_INFINITY,f32::max)-centers.iter().copied().fold(f32::INFINITY,f32::min)>8.0);}
-            assert_eq!(expression.frame(0.0),0);assert_eq!(expression.frame(expression.duration()),15);
+            if expression as usize>=9 {assert!(centers.iter().copied().fold(f32::NEG_INFINITY,f32::max)-centers.iter().copied().fold(f32::INFINITY,f32::min)>2.0,"张望的表情应真的左右移动");}
+            assert_eq!(expression.frame(0.0),0);assert_eq!(expression.frame(expression.duration()),14);
         }
     }
     #[test]
@@ -193,14 +229,12 @@ mod tests {
         let output=frame(&mut expressions,None);let id=expressions.sheet.as_ref().unwrap().2.id();
         let delta=&output.textures_delta.set.iter().find(|(texture,_)|*texture==id).unwrap().1;
         let egui::ImageData::Color(image)=&delta.image else{panic!("表情应为彩色纹理")};
-        assert_eq!(image.size,[144,1440],"只上传正在播放的表情，不上传整张图集");
-        let white=image.pixels.iter().position(|p|p.a()>250&&p.r()>240&&p.g()>240&&p.b()>240).unwrap();
+        assert_eq!(image.size,[144,1350],"只上传正在播放的表情，不上传整张图集");
+        assert!(image.pixels.iter().any(|p|p.a()>200&&p.r()<70&&p.g()<55&&p.b()<45),"表情应带着深色眼睛");
         assert!(!frame(&mut expressions,None).textures_delta.set.iter().any(|(texture,_)|*texture==id),"同一表情、同一皮肤不能重复解码或上传");
         for palette in [crate::skin_paint::CREAM,crate::skin_paint::GLASS_LIGHT] {
             let output=frame(&mut expressions,Some(palette));assert_eq!(expressions.sheet.as_ref().unwrap().2.id(),id);
-            let delta=&output.textures_delta.set.iter().find(|(texture,_)|*texture==id).unwrap().1;
-            let egui::ImageData::Color(image)=&delta.image else{unreachable!()};
-            assert!(image.pixels[white].r()<70&&image.pixels[white].g()<70&&image.pixels[white].b()<70,"浅色皮肤上的眼睛应为深色");
+            assert!(!output.textures_delta.set.iter().any(|(texture,_)|*texture==id),"彩色表情按原图显示，不随浅色皮肤反相");
         }
         expressions.play(Expression::Search);
         let output=frame(&mut expressions,None);assert_eq!(expressions.sheet.as_ref().unwrap().2.id(),id,"换表情原地替换，不新建纹理");
@@ -215,7 +249,7 @@ mod tests {
         let atlas=image::load_from_memory(include_bytes!("../assets/pet/expressions.png")).unwrap().into_rgba8();
         for expression in Expression::ALL {
             let sheet=image::load_from_memory(expression.sheet()).unwrap().into_rgba8();
-            let column=image::imageops::crop_imm(&atlas,expression as u32*144,0,144,1440).to_image();
+            let column=image::imageops::crop_imm(&atlas,expression as u32*144,0,144,1350).to_image();
             assert!(sheet==column,"{expression:?} 与图集不一致，请重新拆分");
         }
     }

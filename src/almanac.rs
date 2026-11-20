@@ -1,5 +1,5 @@
 //! 离线农历、节气、常见节日和宜忌。不联网，也不依赖外部历法库。
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, NaiveDate, Weekday};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Almanac {
@@ -17,6 +17,24 @@ pub fn describe(date: NaiveDate) -> Almanac {
     if let Some(term) = solar_term(date) { parts.push(term.to_string()); }
     if let Some(festival) = festival(date, &lunar) { parts.push(festival.to_string()); }
     Almanac { beside: parts.join(" · "), advice: advice(date, &lunar) }
+}
+
+/// 月历格子里的一行小字：节气、节日，以及农历初一的月份或其它日子的日名。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DayMark {
+    pub lunar: String,
+    pub term: Option<&'static str>,
+    pub festival: Option<&'static str>,
+}
+
+pub fn day_mark(date: NaiveDate) -> Option<DayMark> {
+    let lunar = lunar_date(date)?;
+    let lunar_text = if lunar.day == 1 {
+        format!("{}{}月", if lunar.leap { "闰" } else { "" }, MONTHS[lunar.month as usize - 1])
+    } else {
+        day_name(lunar.day)
+    };
+    Some(DayMark { lunar: lunar_text, term: solar_term(date), festival: festival(date, &lunar) })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,10 +90,13 @@ fn festival(date: NaiveDate, lunar: &Lunar) -> Option<&'static str> {
         (6, 1) => Some("儿童节"),
         (9, 10) => Some("教师节"),
         (10, 1) => Some("国庆节"),
+        (11, 1) => Some("万圣节"),
+        (11, 11) => Some("购物节"),
         (12, 25) => Some("圣诞节"),
         _ => None,
     };
     if gregorian.is_some() { return gregorian; }
+    if date.month() == 11 && date.weekday() == Weekday::Thu && (22..=28).contains(&date.day()) { return Some("感恩节"); }
     if lunar.leap { return None; }
     match (lunar.month, lunar.day) {
         (1, 1) => Some("春节"),
@@ -85,6 +106,7 @@ fn festival(date: NaiveDate, lunar: &Lunar) -> Option<&'static str> {
         (7, 15) => Some("中元节"),
         (8, 15) => Some("中秋节"),
         (9, 9) => Some("重阳节"),
+        (10, 15) => Some("下元节"),
         (12, 8) => Some("腊八节"),
         _ => None,
     }.or_else(|| {
@@ -305,6 +327,17 @@ mod tests {
         let old = describe(day("1899-12-31"));
         assert_eq!(old.beside, "无");
         assert_eq!(old.advice, "无");
+    }
+
+    #[test]
+    fn november_labels_match_the_public_calendar() {
+        assert!(describe(day("2026-11-01")).beside.contains("万圣节"));
+        assert!(describe(day("2026-11-11")).beside.contains("购物节"));
+        assert!(describe(day("2026-11-26")).beside.contains("感恩节"));
+        assert!(!describe(day("2026-11-27")).beside.contains("感恩节"));
+        let xia_yuan = (1..=30).map(|n| day(&format!("2026-11-{n:02}"))).find(|date| day_mark(*date).is_some_and(|mark| mark.festival == Some("下元节")));
+        assert!(xia_yuan.is_some(), "十一月应有下元节");
+        assert!((1..=30).map(|n| day(&format!("2026-11-{n:02}"))).any(|date| day_mark(date).is_some_and(|mark| mark.lunar == "十月")));
     }
 
     #[test]

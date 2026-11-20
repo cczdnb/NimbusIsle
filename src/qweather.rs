@@ -216,7 +216,7 @@ impl Runtime {
 mod tests {
     use super::*;
     use serde_json::json;
-    fn directory()->std::path::PathBuf {let p=std::env::temp_dir().join(format!("daozai-qweather-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));std::fs::create_dir_all(&p).unwrap();p}
+    fn directory()->std::path::PathBuf {let p=std::env::temp_dir().join(format!("yunyu-qweather-{}-{}",std::process::id(),chrono::Utc::now().timestamp_nanos_opt().unwrap()));std::fs::create_dir_all(&p).unwrap();p}
     fn location()->Location {Location{position:Position{lat:30.27,lon:120.15,label:"杭州".into(),region:"浙江省 · 杭州市".into()},timezone:"Asia/Shanghai".into()}}
     fn current()->Value {json!({"validTime":chrono::Utc::now().to_rfc3339(),"temperature":{"value":21.5,"unit":"°C"},"feelsLike":{"value":293.15,"unit":"K"},"condition":{"code":"305","text":"小雨"},"humidity":0.68,"wind":{"speed":{"value":4.5,"unit":"m/s"}},"metadata":{"attributions":["https://example.invalid/credit"]}})}
     fn daily()->Value {let d=chrono::Utc::now().with_timezone(&chrono_tz::Asia::Shanghai).date_naive();json!({"days":[{"forecastStartTime":format!("{d}T00:00:00+08:00"),"temperatureMax":{"value":25,"unit":"°C"},"temperatureMin":{"value":15,"unit":"°C"},"astro":{"sunrise":format!("{d}T06:10:00+08:00"),"sunset":format!("{d}T17:20:00+08:00")},"daytime":{"condition":{"code":"305"},"precipitation":{"probability":0.25}},"nighttime":{"precipitation":{"probability":0.8}}}]})}

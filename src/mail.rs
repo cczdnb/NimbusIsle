@@ -816,7 +816,7 @@ mod service {
             let (ev_tx, ev_rx) = channel();
             let (cmd_tx, cmd_rx) = channel();
             let _ = std::thread::Builder::new()
-                .name("daozai-mail".into())
+                .name("yunyu-mail".into())
                 .spawn(move || supervisor(cmd_rx, ev_tx));
             let (manage,done)=crate::mail_manage::start();
             Self { cmd: cmd_tx, ev: ev_rx,manage,done }
@@ -867,7 +867,7 @@ mod service {
                         let flag = stop.clone();
                         let ev = ev.clone();
                         let iv = interval.clone();
-                        let name = "daozai-mail".to_string();
+                        let name = "yunyu-mail".to_string();
                         let running_account=account.clone();
                         if let Ok(handle) = std::thread::Builder::new()
                             .name(name)
@@ -880,7 +880,7 @@ mod service {
                 Cmd::Test(account, password) => {
                     let ev = ev.clone();
                     let _ = std::thread::Builder::new()
-                        .name("daozai-mail-test".into())
+                        .name("yunyu-mail-test".into())
                         .spawn(move || {
                             let result = net::probe(&account, &password);
                             let _ = ev.send(Event::Test {
@@ -1387,7 +1387,7 @@ mod service {
         let (tx,rx)=std::sync::mpsc::channel();recent(&mut session,&account,&tx).unwrap();
         let items=rx.try_iter().filter_map(|ev|if let Event::Mail{item,..}=ev{Some(item)}else{None}).collect::<Vec<_>>();
         let invite=items.iter().find(|m|m.subject=="【云屿测试】邮件日程邀请：收件箱合并验证").expect("测试邀请未到达");
-        assert_eq!(invite.meeting.as_ref().unwrap().uid,"daozai-mail-test-20261103-1500");
+        assert_eq!(invite.meeting.as_ref().unwrap().uid,"yunyu-mail-test-20261103-1500");
         let plain=items.iter().find(|m|m.subject=="DAOZAI-DATE-TEST-20261103").expect("普通日期邮件未到达");
         assert!(plain.meeting.is_none());session.logout().unwrap();
         println!("invitation_recognized=true plain_date_rejected=true");

@@ -1,5 +1,5 @@
 //! 天气页与天气设置：实况、七日预报与日照时段，图标全部用面板矢量绘制。
-use crate::app::{App, Cmd, Env, WEATHER_PAGE, WEATHER_H};
+use crate::app::{App, Cmd, Env, PW, WEATHER_PAGE, WEATHER_H};
 use crate::paint::{self, Card, H};
 use crate::theme::{self, W};
 use crate::weather::{self, Kind};
@@ -72,8 +72,8 @@ const PILL_ICON: f32 = 15.0;
 const SUN_SLIDE: f32 = 1.4;
 /// 点击反馈的时长（秒）。
 const TAP_FX: f32 = 0.38;
-/// 进入天气页后，图标环境动效持续的秒数；之后静止，指针停在页面上时继续。
-const AMBIENT_SECS: f64 = 6.0;
+/// 天气页天空粒子的活动范围：避开顶栏、圆角和底部来源行。
+const PAGE_SKY: (f32, f32, f32, f32) = (14.0, 32.0, PW - 28.0, WEATHER_H - 50.0);
 
 /// 胶囊上的温度文字：取整并带度符，负零归零。
 /// 温度文字：取整并带度符，负零归零。零下的减号在绘制时另行处理，见 `paint_temp`。
@@ -534,6 +534,163 @@ fn paint_sun_times(c: &Card, snapshot: &weather::Snapshot, now: i64, t: f32, sli
     }
 }
 
+// ---------- 天空动效 ----------
+
+/// 0..1 的稳定散列。同一颗粒子每次都走同一条轨迹，不需要额外状态。
+fn unit(i: u32, salt: u32) -> f32 {
+    let mut n = i.wrapping_mul(0x9E37_79B1) ^ salt.wrapping_mul(0x85EB_CA6B);
+    n ^= n >> 16;
+    n = n.wrapping_mul(0x7FEB_352D);
+    n ^= n >> 15;
+    (n & 0x00FF_FFFF) as f32 / 16_777_216.0
+}
+
+/// 靠近区域上下边缘时变淡，粒子进出画面不突然出现。
+fn veil(y: f32, top: f32, height: f32) -> f32 {
+    let t = ((y - top) / height).clamp(0.0, 1.0);
+    (t * 7.0).min(1.0) * ((1.0 - t) * 5.0).min(1.0)
+}
+
+/// 太阳闪光：图标外围一圈缓转的柔光，加上几颗按时亮起又熄灭的星芒。
+fn sunburst(c: &Card, cx: f32, cy: f32, radius: f32, t: f32, soft: bool) {
+    let rays = if soft { 6 } else { 10 };
+    let reach = radius * if soft { 1.2 } else { 1.85 };
+    for i in 0..rays {
+        let a = t * 0.22 + i as f32 * TAU / rays as f32;
+        let len = reach * (0.62 + 0.38 * (t * 1.1 + i as f32 * 0.8).sin().abs());
+        let half = len * if i % 2 == 0 { 0.07 } else { 0.035 };
+        let (dx, dy) = (a.cos(), a.sin());
+        let near = radius * 0.72;
+        let base = (cx + dx * near, cy + dy * near);
+        let tip = (cx + dx * (near + len), cy + dy * (near + len));
+        c.poly(
+            &[(base.0 - dy * half, base.1 + dx * half), tip, (base.0 + dy * half, base.1 - dx * half)],
+            paint::alpha(SUN_LIGHT, if soft { 0.14 } else { 0.22 }),
+        );
+    }
+    let flashes = if soft { 3 } else { 5 };
+    for i in 0..flashes {
+        let phase = (t * 0.42 + unit(i, 41)).fract();
+        let flash = if phase < 0.32 { (phase / 0.32 * PI).sin() } else { 0.0 };
+        if flash < 0.08 { continue; }
+        let ang = unit(i, 43) * TAU + t * 0.2;
+        let dist = radius * (1.05 + unit(i, 47) * 0.85);
+        sparkle(c, cx + ang.cos() * dist, cy + ang.sin() * dist, radius * (0.08 + 0.1 * flash), paint::alpha(Color32::WHITE, 0.9 * flash));
+    }
+}
+
+/// 没有大太阳可依附时，在天空区域零星闪几颗光点。
+fn glints(c: &Card, t: f32, area: (f32, f32, f32, f32)) {
+    let (ox, oy, w, h) = area;
+    for i in 0..6u32 {
+        let phase = (t * 0.4 + unit(i, 2)).fract();
+        let flash = if phase < 0.34 { (phase / 0.34 * PI).sin() } else { 0.0 };
+        if flash < 0.08 { continue; }
+        sparkle(
+            c,
+            ox + unit(i, 4) * w,
+            oy + unit(i, 6) * h * 0.62,
+            1.5 + 2.2 * flash,
+            paint::alpha(SUN_LIGHT, 0.8 * flash),
+        );
+    }
+}
+
+/// 斜向雨丝。`speed` 是每秒走完画面的次数。水滴只落在左上角的天空区，不掉到预报曲线上。
+fn rain_field(c: &Card, t: f32, area: (f32, f32, f32, f32), count: u32, speed: f32) {
+    let (ox, oy, w, h) = area;
+    for i in 0..count {
+        let depth = 0.5 + 0.5 * unit(i, 3);
+        let len = (8.0 + 14.0 * unit(i, 5)) * depth;
+        let x = ox + unit(i, 7) * w;
+        let y = oy + (unit(i, 9) + t * speed * depth).fract() * (h + len) - len;
+        let fade = veil(y, oy, h) * (0.42 + 0.48 * depth);
+        let (x2, y2) = (x - len * 0.28, y + len);
+        c.seg((x, y), (x2, y2), 0.9 + depth * 0.45, paint::alpha(RAIN, fade));
+        if unit(i, 13) > 0.86 && x < ox + w * 0.42 && y < oy + h * 0.46 {
+            paint::droplet(c, x2, y2, 3.6 + 2.2 * unit(i, 17), paint::alpha(RAIN, (fade + 0.25).min(0.92)));
+        }
+    }
+}
+
+fn snow_field(c: &Card, t: f32, area: (f32, f32, f32, f32)) {
+    let (ox, oy, w, h) = area;
+    for i in 0..14u32 {
+        let sway = (t * 0.6 + unit(i, 3) * TAU).sin() * 9.0;
+        let x = ox + unit(i, 5) * w + sway;
+        let y = oy + (unit(i, 9) + t * (0.07 + unit(i, 7) * 0.07)).fract() * (h + 8.0) - 4.0;
+        let fade = veil(y, oy, h);
+        let r = 1.05 + unit(i, 11) * 1.5;
+        if unit(i, 13) > 0.72 {
+            snowflake(c, x, y, r * 2.3, t * 0.45 + unit(i, 15) * TAU, false);
+        } else {
+            c.circle(x, y, r, paint::alpha(SNOW, 0.82 * fade));
+        }
+    }
+}
+
+fn star_field(c: &Card, t: f32, area: (f32, f32, f32, f32)) {
+    let (ox, oy, w, h) = area;
+    for i in 0..10u32 {
+        let tw = 0.2 + 0.8 * (t * 1.5 + unit(i, 3) * TAU).sin().abs();
+        sparkle(
+            c,
+            ox + unit(i, 5) * w,
+            oy + unit(i, 7) * h * 0.7,
+            1.1 + unit(i, 9) * 1.5,
+            paint::alpha(MOON, 0.75 * tw),
+        );
+    }
+}
+
+fn fog_field(c: &Card, t: f32, area: (f32, f32, f32, f32)) {
+    let (ox, oy, w, h) = area;
+    for i in 0..4u32 {
+        let shift = (t * 0.28 + i as f32 * 1.4).sin() * 18.0;
+        let y = oy + h * (0.16 + 0.2 * i as f32);
+        c.fill(ox + shift, y, w, 9.0 + i as f32 * 3.0, 6.0, paint::alpha(FOG, 0.1 + i as f32 * 0.025));
+    }
+}
+
+fn lightning(c: &Card, t: f32, area: (f32, f32, f32, f32)) {
+    let (x, y, w, h) = area;
+    let k = (t * 0.33).fract();
+    let burst = if k < 0.04 { 1.0 - k / 0.04 } else if (0.07..0.095).contains(&k) { 0.5 } else { 0.0 };
+    if burst > 0.02 {
+        c.fill(x, y, w, h, 14.0, Color32::from_white_alpha((burst * 34.0) as u8));
+    }
+}
+
+/// 天空层画在内容后面：闪光、星光、雾和闪电。雨雪要盖在卡片上才看得出来，单独用 `paint_precipitation`。
+/// `anchor` 是太阳图标的圆心和半径；日照视图里太阳沿弧线走，就不在这里再画一轮。
+fn paint_atmosphere(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32), anchor: Option<(f32, f32, f32)>) {
+    let scene = c.clipped(area.0, area.1, area.2, area.3);
+    toned(&scene, || match kind {
+        Kind::Sun | Kind::Partly | Kind::Shower => match anchor {
+            Some((x, y, r)) => sunburst(&scene, x, y, r, t, kind != Kind::Sun),
+            None if kind != Kind::Shower => glints(&scene, t, area),
+            None => {}
+        },
+        Kind::Moon | Kind::PartlyNight => star_field(&scene, t, area),
+        Kind::Thunder => lightning(&scene, t, area),
+        Kind::Fog => fog_field(&scene, t, area),
+        Kind::Cloud | Kind::Drizzle | Kind::Rain | Kind::Snow => {}
+    });
+}
+
+/// 雨丝和雪花盖在实况上面，细而透，文字仍可读。
+fn paint_precipitation(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32)) {
+    let scene = c.clipped(area.0, area.1, area.2, area.3);
+    toned(&scene, || match kind {
+        Kind::Drizzle => rain_field(&scene, t, area, 18, 0.7),
+        Kind::Rain => rain_field(&scene, t, area, 34, 1.25),
+        Kind::Shower => rain_field(&scene, t, area, 26, 1.05),
+        Kind::Thunder => rain_field(&scene, t, area, 30, 1.4),
+        Kind::Snow => snow_field(&scene, t, area),
+        _ => {}
+    });
+}
+
 // ---------- 天气视图 ----------
 
 /// `lift` / `press`：指针停在、按在日照入口卡上的过渡量。
@@ -942,6 +1099,20 @@ impl App {
         if c.hit(304.0, 8.0, 44.0, 21.0, "weather-refresh").on_hover_text("重新获取天气；自动模式会重新定位。请求间隔至少 30 秒，失败后至少 2 分钟").clicked() && ready {
             self.weather_refresh();
         }
+        let ctx=c.ui.ctx().clone();
+        let motion=self.settings.weather_scene && crate::bar_layout::animations_enabled();
+        // 开关打开时才让雨雪和闪光持续动；离开页面或关闭动效后不再请求重绘。
+        let t=ambient_clock(&ctx,egui::Id::new(("weather-ambient",c.live)),c.live && self.weather.snapshot.is_some() && motion,env.t);
+        let mix=ctx.animate_bool_with_time(egui::Id::new(("weather-view-blend",c.live)),self.weather.solar_open,0.24);
+        let sky_kind=self.weather.snapshot.as_ref().map(|snapshot|weather::kind(snapshot.code,snapshot.day));
+        if motion {
+            if let Some(kind)=sky_kind {
+                if !crate::weather_scene::covers(kind) || kind==Kind::Thunder {
+                    let anchor=if mix<0.5 {Some((66.0,72.0,23.0))} else {None};
+                    paint_atmosphere(c,kind,t,PAGE_SKY,anchor);
+                }
+            }
+        }
         let footer=WEATHER_H-4.0;
         let source=self.weather_source.displayed;
         let source_label=if source==crate::weather_source_ui::Provider::Qweather{"QWeather"}else{source.name()};
@@ -994,19 +1165,10 @@ impl App {
             let at=response.interact_pointer_pos().map(|p|c.to_local(p)).unwrap_or(egui::pos2(209.5,120.0));
             self.weather.tap=Some((at.x,at.y,env.t));
         }
-        let ctx=c.ui.ctx().clone();
-        // 进页面后先动几秒再静止；指针停在页面上时继续动。离开再回来重新计时。
-        let seen_id=egui::Id::new(("weather-page-seen",c.live));
-        let (mut seen,last)=ctx.data(|d|d.get_temp::<(f64,f64)>(seen_id)).unwrap_or((env.t,env.t));
-        if env.t-last>0.5 {seen=env.t;}
-        ctx.data_mut(|d|d.insert_temp(seen_id,(seen,env.t)));
-        let ambient=c.live && (response.hovered() || env.t-seen<AMBIENT_SECS);
-        let t=ambient_clock(&ctx,egui::Id::new(("weather-ambient",c.live)),ambient,env.t);
         // 日照入口卡的悬停与按下：只在指针落在卡片范围内时生效。
         let on_entry=response.hover_pos().map(|p|c.to_local(p)).is_some_and(|p|(300.0..384.0).contains(&p.x)&&(77.0..111.0).contains(&p.y)) && !self.weather.solar_open;
         let lift=ctx.animate_bool_with_time(egui::Id::new(("weather-entry-lift",c.live)),on_entry,0.25);
         let press=ctx.animate_bool_with_time(egui::Id::new(("weather-entry-press",c.live)),on_entry&&response.is_pointer_button_down_on(),0.08);
-        let mix=ctx.animate_bool_with_time(egui::Id::new(("weather-view-blend",c.live)),self.weather.solar_open,0.24);
         let slide=((env.t-self.weather.solar_at) as f32/SUN_SLIDE).clamp(0.0,1.0);
         // 两个视图交叉淡入，同时轻微缩放，切换有景深感。
         if mix<1.0 {
@@ -1016,6 +1178,12 @@ impl App {
         if mix>0.0 {
             let solar=c.faded(mix.powi(2)).scaled(209.5,128.0,0.96+0.04*mix).ghost();
             paint_sun_times(&solar,&snapshot,weather_now(env),t,if self.weather.solar_open{slide}else{1.0});
+        }
+        if motion {
+            if let Some(kind)=sky_kind {
+                if crate::weather_scene::covers(kind) {crate::weather_scene::paint(c,kind,t,PAGE_SKY);}
+                else {paint_precipitation(c,kind,t,PAGE_SKY);}
+            }
         }
         if let Some((x,y,at))=self.weather.tap {
             let k=(env.t-at) as f32/TAP_FX;
@@ -1035,8 +1203,9 @@ impl App {
         let height = 150.0;
         let (rect, hero) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         let c = Card::new(ui, rect.min, rect);
-        // 设置页常开时不持续重绘：只在指针停在卡片上时让图标动起来。
-        let t = ambient_clock(&ctx, hero.id.with("ambient"), hero.hovered(), ctx.input(|i| i.time));
+        let motion = self.settings.weather_scene && crate::bar_layout::animations_enabled();
+        // 设置页常开时不持续重绘：只在指针停在卡片上、并且动效开着时让画面动起来。
+        let t = ambient_clock(&ctx, hero.id.with("ambient"), hero.hovered() && motion, ctx.input(|i| i.time));
         let snapshot = self.weather.snapshot.clone();
         let kind = snapshot.as_ref().map(|s| weather::kind(s.code, s.day));
         let (top, bottom) = kind.map(hero_colors).unwrap_or((Color32::from_rgb(86, 94, 112), Color32::from_rgb(52, 58, 72)));
@@ -1054,6 +1223,8 @@ impl App {
         };
         let kind = kind.unwrap_or(Kind::Cloud);
         c.glow(width - 74.0, 66.0, 64.0, paint::alpha(tint(kind), 0.30));
+        let sky = (8.0, 8.0, width - 16.0, height - 16.0);
+        if motion { paint_atmosphere(&c, kind, t, sky, Some((width - 74.0, 66.0, 34.0))); }
         icon_at(&c, width - 74.0, 66.0, 76.0, kind, Some(t));
 
         location_glyph(&c, 26.0, 30.0, theme::WHITE, top);
@@ -1094,16 +1265,25 @@ impl App {
         let spin = if self.weather.loading { ctx.request_repaint(); ctx.input(|i| i.time) as f32 * 6.0 } else { 0.0 };
         paint::reset(&c.scaled(bx, by, 0.95), bx, by, spin, if ready || self.weather.loading { theme::WHITE } else { faint });
         c.text(bx - 20.0, 128.5, &format!("更新于 {}", weather::clock(snapshot.at)), 11.0, W::Regular, faint, H::Right);
+        if motion {
+            if crate::weather_scene::covers(kind) {crate::weather_scene::paint(&c,kind,t,sky);}
+            else {paint_precipitation(&c,kind,t,sky);}
+        }
         if button.clicked() { self.weather_refresh(); }
     }
 
     pub(crate) fn weather_settings(&mut self, ui: &mut egui::Ui) {
-        use crate::extras::{settings_card, settings_hint, settings_label};
+        use crate::extras::{settings_card, settings_hint, settings_label, setting_row};
         use crate::settings_theme::color;
         let ctx=ui.ctx().clone();
         let accent=color(&ctx,Color32::from_rgb(96,164,255),Color32::from_rgb(34,108,220));
         ui.add_space(4.0);
         self.weather_source_settings(ui);
+        ui.add_space(8.0);
+        settings_label(ui,"动效");
+        settings_card(ui,|ui|{
+            setting_row(ui,"天气动效","下雨落下雨丝，下雪飘雪花，晴天保留阳光闪光。关闭后天气页保持静止。",&mut self.settings.weather_scene);
+        });
         ui.add_space(12.0);
         if self.weather_source.selected==crate::weather_source_ui::Provider::Qweather {
             if self.weather_source.displayed==self.weather_source.selected {self.weather_settings_hero(ui);ui.add_space(8.0);}

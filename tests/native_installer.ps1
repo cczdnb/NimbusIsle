@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$NsisCompiler)
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
-$id = 'DaozaiSetupTest' + [Guid]::NewGuid().ToString('N')
+$id = 'YunyuSetupTest' + [Guid]::NewGuid().ToString('N')
 $name = '云屿安装测试-' + $id.Substring(15,8)
 $root = Join-Path $project ('target\' + $id)
 $installed = Join-Path $root 'installed files'
@@ -14,7 +14,7 @@ $source = Join-Path $root 'fixture.cs'
 $fixture = Join-Path $root 'fixture.exe'
 & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:winexe "/out:$fixture" $source
 if ($LASTEXITCODE -ne 0) { throw '测试程序编译失败' }
-$setup = Join-Path $root 'Daozai-TestInstaller.exe'
+$setup = Join-Path $root 'Yunyu-TestInstaller.exe'
 & $NsisCompiler /V2 /WX "/DAPP_ID=$id" "/DAPP_NAME=$name" /DAPP_VERSION=9.8.7 "/DPROJECT_DIR=$project" "/DSOURCE_EXE=$fixture" "/DOUTPUT_FILE=$setup" (Join-Path $project 'installer\setup.nsi')
 if ($LASTEXITCODE -ne 0) { throw '测试安装器编译失败' }
 New-Item -ItemType Directory -Path $data -Force | Out-Null

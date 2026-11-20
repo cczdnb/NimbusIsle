@@ -42,7 +42,7 @@ pub fn fetch(agent: &ureq::Agent, account: &Account) -> Result<Snapshot, (String
         .set("Accept", "application/json")
         .send_string("{}")
         .map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => ("登录已失效，请在 Cursor 中重新登录".into(), 0),
+            ureq::Error::Status(401 | 403, _) => rejected(&session.token),
             ureq::Error::Status(429, response) => ("请求过于频繁，稍后自动重试".into(), response.header("Retry-After").and_then(|value| value.parse().ok()).unwrap_or(180).clamp(30, 3600)),
             ureq::Error::Status(_, _) => ("暂时读不到套餐额度".into(), 60),
             _ => ("无法连接 Cursor 额度服务，请检查网络或代理".into(), 30),
@@ -104,11 +104,55 @@ fn cycle_end(value: &Value) -> Option<i64> {
 
 struct Session { token: String, email: Option<String>, plan: Option<String> }
 
+/// 接口拒绝时，先看本机令牌是否还在有效期内。没过期就不要提示去重新登录。
+fn rejected(token: &str) -> (String, u64) {
+    match jwt_expiry(token) {
+        Some(exp) if exp > chrono::Utc::now().timestamp() => ("Cursor 仍是登录状态，这次没查到额度，稍后会再试".into(), 60),
+        _ => ("登录已失效，请在 Cursor 中重新登录".into(), 0),
+    }
+}
+
+fn jwt_expiry(token: &str) -> Option<i64> {
+    let payload = token.split('.').nth(1)?;
+    let bytes = b64url(payload)?;
+    serde_json::from_slice::<Value>(&bytes).ok()?.get("exp")?.as_i64()
+}
+
+fn b64url(input: &str) -> Option<Vec<u8>> {
+    fn val(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'-' | b'+' => Some(62),
+            b'_' | b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let bytes: Vec<u8> = input.bytes().filter(|byte| *byte != b'=').collect();
+    if bytes.len() % 4 == 1 { return None; }
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        let a = val(bytes[index])?;
+        let b = val(bytes[index + 1])?;
+        out.push((a << 2) | (b >> 4));
+        if index + 2 >= bytes.len() { break; }
+        let c = val(bytes[index + 2])?;
+        out.push((b << 4) | (c >> 2));
+        if index + 3 >= bytes.len() { break; }
+        let d = val(bytes[index + 3])?;
+        out.push((c << 6) | d);
+        index += 4;
+    }
+    Some(out)
+}
+
 fn read_session(path: &Path) -> Result<Session, String> {
     if !path.is_file() { return Err("未找到本机 Cursor".into()); }
-    let token = item(path, "cursorAuth/accessToken").unwrap_or_default();
-    let email = item(path, "cursorAuth/cachedEmail").filter(|value| !value.is_empty());
-    let plan = item(path, "cursorAuth/stripeMembershipType").filter(|value| !value.is_empty());
+    let token = item(path, "cursorAuth/accessToken")?;
+    let email = item(path, "cursorAuth/cachedEmail").ok().filter(|value| !value.is_empty());
+    let plan = item(path, "cursorAuth/stripeMembershipType").ok().filter(|value| !value.is_empty());
     Ok(Session { token, email, plan })
 }
 
@@ -118,12 +162,12 @@ fn plain(raw: &str) -> String {
 }
 
 #[cfg(not(windows))]
-fn item(_path: &Path, _key: &str) -> Option<String> { None }
+fn item(_path: &Path, _key: &str) -> Result<String, String> { Err("暂时读不到 Cursor 的登录状态".into()) }
 
 #[cfg(windows)]
-fn item(path: &Path, key: &str) -> Option<String> {
+fn item(path: &Path, key: &str) -> Result<String, String> {
     let sql = format!("SELECT value FROM ItemTable WHERE key = '{key}' LIMIT 1");
-    sqlite::text(path, &sql).ok().map(|value| plain(&value)).filter(|value| !value.is_empty())
+    sqlite::text(path, &sql).map(|value| plain(&value))
 }
 
 #[cfg(windows)]
@@ -149,19 +193,31 @@ mod sqlite {
         let name = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "路径无效".to_string())?;
         let mut db = std::ptr::null_mut();
         let rc = unsafe { sqlite3_open_v2(name.as_ptr(), &mut db, OPEN_READONLY, std::ptr::null()) };
-        if rc != 0 || db.is_null() { return Err("无法读取 Cursor 登录".into()); }
-        unsafe { sqlite3_busy_timeout(db, 200); }
+        if rc != 0 || db.is_null() {
+            if !db.is_null() { unsafe { sqlite3_close(db); } }
+            return Err(sqlite_error(rc));
+        }
+        unsafe { sqlite3_busy_timeout(db, 1500); }
         let db = Db(db);
         let sql = CString::new(sql).map_err(|_| "语句无效".to_string())?;
         let mut stmt = std::ptr::null_mut();
         let rc = unsafe { sqlite3_prepare_v2(db.0, sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut()) };
-        if rc != 0 { return Err("无法读取 Cursor 登录".into()); }
-        let value = if unsafe { sqlite3_step(stmt) } == ROW {
+        if rc != 0 { return Err(sqlite_error(rc)); }
+        let step = unsafe { sqlite3_step(stmt) };
+        let value = if step == ROW {
             let ptr = unsafe { sqlite3_column_text(stmt, 0) };
             if ptr.is_null() { String::new() } else { unsafe { CStr::from_ptr(ptr.cast()) }.to_string_lossy().into_owned() }
-        } else { String::new() };
+        } else if step == 101 {
+            String::new()
+        } else {
+            unsafe { sqlite3_finalize(stmt); }
+            return Err(sqlite_error(step));
+        };
         unsafe { sqlite3_finalize(stmt); }
         Ok(value)
+    }
+    fn sqlite_error(code: c_int) -> String {
+        if code == 5 || code == 6 { "Cursor 正在使用登录数据，稍后再试".into() } else { "暂时读不到 Cursor 的登录状态".into() }
     }
 }
 
@@ -202,6 +258,37 @@ mod tests {
         value["planUsage"]["autoPercentUsed"] = Value::Null;
         assert!(parse(&value).is_err());
         assert!(parse(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn a_live_session_is_not_reported_as_logged_out_when_the_api_rejects_it() {
+        let header = "eyJhbGciOiJub25lIn0";
+        let live = format!("{header}.{}.sig", b64url_test(br#"{"exp":4102444800}"#));
+        let dead = format!("{header}.{}.sig", b64url_test(br#"{"exp":1000}"#));
+        let (message, wait) = rejected(&live);
+        assert_eq!(message, "Cursor 仍是登录状态，这次没查到额度，稍后会再试");
+        assert_eq!(wait, 60);
+        assert!(jwt_expiry(&live) == Some(4102444800));
+        let (message, wait) = rejected(&dead);
+        assert_eq!(message, "登录已失效，请在 Cursor 中重新登录");
+        assert_eq!(wait, 0);
+        let (message, _) = rejected("not-a-jwt");
+        assert_eq!(message, "登录已失效，请在 Cursor 中重新登录");
+    }
+
+    fn b64url_test(data: &[u8]) -> String {
+        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let a = chunk[0];
+            let b = chunk.get(1).copied().unwrap_or(0);
+            let c = chunk.get(2).copied().unwrap_or(0);
+            out.push(TABLE[(a >> 2) as usize] as char);
+            out.push(TABLE[(((a & 3) << 4) | (b >> 4)) as usize] as char);
+            if chunk.len() > 1 { out.push(TABLE[(((b & 15) << 2) | (c >> 6)) as usize] as char); }
+            if chunk.len() > 2 { out.push(TABLE[(c & 63) as usize] as char); }
+        }
+        out
     }
 
     #[test]

@@ -22,7 +22,7 @@ fn message(directory: &Path, title: &str, details: &str) -> String {
 }
 
 pub fn report(title: &str, details: &str) {
-    let text = message(&daozai::model::config_dir().join("diagnostics"), title, details);
+    let text = message(&yunyu::model::config_dir().join("diagnostics"), title, details);
     #[cfg(windows)]
     {
         use windows::core::{w, PCWSTR};
@@ -36,7 +36,7 @@ pub fn report(title: &str, details: &str) {
 
 /// 仅记录最近一次启动停留的阶段，不记录账号或用户内容。
 pub fn startup(stage:&str) {
-    let directory=daozai::model::config_dir().join("diagnostics");
+    let directory=yunyu::model::config_dir().join("diagnostics");
     if std::fs::create_dir_all(&directory).is_ok() {
         let _=std::fs::write(directory.join("last-startup.log"),format!(
             "云屿 {}\n进程：{}\n启动阶段：{stage}\n",env!("CARGO_PKG_VERSION"),std::process::id()));
@@ -51,13 +51,13 @@ pub fn graphics(cc:&eframe::CreationContext<'_>) {
     else if let Some(state)=&cc.wgpu_render_state {
         let info=state.adapter.get_info();format!("渲染器：{}\n图形后端：{:?}\n设备类型：{:?}\n",info.name,info.backend,info.device_type)
     }else{return;};
-    let directory=daozai::model::config_dir().join("diagnostics");
+    let directory=yunyu::model::config_dir().join("diagnostics");
     if std::fs::create_dir_all(&directory).is_ok(){let _=std::fs::write(directory.join("last-graphics.log"),details);}
 }
 
 static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-fn diagnostics_dir() -> PathBuf { daozai::model::config_dir().join("diagnostics") }
+fn diagnostics_dir() -> PathBuf { yunyu::model::config_dir().join("diagnostics") }
 
 /// 自动重启的频率限制：本次至少运行 30 秒（避免启动即崩的死循环），且一小时内最多 3 次。
 fn restart_allowed(history: &str, now: u64, uptime: std::time::Duration) -> bool {
@@ -71,7 +71,7 @@ fn restart_allowed(history: &str, now: u64, uptime: std::time::Duration) -> bool
 pub fn spawn_replacement() -> bool {
     let Ok(exe) = std::env::current_exe() else { return false };
     let mut command = std::process::Command::new(exe);
-    command.arg("--restart-after").arg(std::process::id().to_string()).env_remove("DAOZAI_TEST_CRASH");
+    command.arg("--restart-after").arg(std::process::id().to_string()).env_remove("YUNYU_TEST_CRASH");
     if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)) { command.current_dir(dir); }
     command.spawn().is_ok()
 }
@@ -142,11 +142,11 @@ mod native_crash {
         let code = record.ExceptionCode.0 as u32;
         let (module, offset) = module_at(record.ExceptionAddress as usize);
         let uptime = super::STARTED.get().map(|at| at.elapsed().as_secs()).unwrap_or(0);
-        let gl_driver = daozai::renderer::is_gl_driver(&module);
-        let renderer = if daozai::renderer::compat_active() { "兼容渲染（Direct3D 12）" } else { "OpenGL" };
+        let gl_driver = yunyu::renderer::is_gl_driver(&module);
+        let renderer = if yunyu::renderer::compat_active() { "兼容渲染（Direct3D 12）" } else { "OpenGL" };
         let mut details = format!("异常代码：{code:#010x}\n崩溃模块：{module}\n模块内偏移：{offset:#x}\n已运行：{uptime} 秒\n渲染方式：{renderer}\n");
-        if gl_driver && !daozai::renderer::compat_active() {
-            daozai::renderer::request_fallback(&module);
+        if gl_driver && !yunyu::renderer::compat_active() {
+            yunyu::renderer::request_fallback(&module);
             details.push_str("判断：崩在显卡的 OpenGL 驱动里，下次启动自动改用兼容渲染（Direct3D 12）。\n");
         }
         let restarted = super::relaunch_after_failure(&format!("进程崩溃（{module}）"));
@@ -158,9 +158,9 @@ mod native_crash {
 
     pub fn install() { unsafe { SetUnhandledExceptionFilter(Some(filter)); } }
 
-    /// 验收用：`DAOZAI_TEST_CRASH=native` 时，运行指定秒数后在云屿自身触发一次访问违规。
+    /// 验收用：`YUNYU_TEST_CRASH=native` 时，运行指定秒数后在云屿自身触发一次访问违规。
     pub fn test_crash_hook() {
-        let Ok(value) = std::env::var("DAOZAI_TEST_CRASH") else { return };
+        let Ok(value) = std::env::var("YUNYU_TEST_CRASH") else { return };
         let Some(seconds) = value.strip_prefix("native:").and_then(|s| s.parse::<u64>().ok()) else { return };
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(seconds));
@@ -192,7 +192,7 @@ mod tests {
     use super::*;
 
     fn directory(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("daozai-diagnostics-{}-{name}", std::process::id()))
+        std::env::temp_dir().join(format!("yunyu-diagnostics-{}-{name}", std::process::id()))
     }
 
     #[test]

@@ -82,29 +82,28 @@ mod tests {
         assert!((pet.music_age-music_age-0.1).abs()<0.001,"恢复听歌后继续轮换");
     }
     #[test]
-    fn microphone_moves_gently_while_the_head_keeps_facing_the_mouth() {
-        let mut heights=Vec::new();let mut angles=Vec::new();
-        for frame in 0..600 {
-            let (head,angle)=microphone_pose(frame as f32/60.0);
-            let tip=[head[0]+7.0*angle.cos(),head[1]+7.0*angle.sin()];
-            let distance=|p:[f32;2]|((p[0]+0.8).powi(2)+(p[1]-20.7).powi(2)).sqrt();
-            assert!(distance(head)<distance(tip),"麦头应在嘴边，麦柄朝外");
-            assert!(head[0]-2.6>1.4 && head[1]-2.6>17.0,"不能遮住嘴或眼睛");
-            assert!(tip[0]+1.0<16.0 && tip[1]+1.0<28.0,"摆动不能超出常驻槽位");
-            heights.push(head[1]);angles.push(angle);
+    fn singing_uses_the_sheet_until_an_expression_interrupts() {
+        let animations=crate::bar_layout::animations_enabled();
+        assert_eq!(crate::pet_expressions::sing_frame(0.0),if animations{0}else{7});
+        if animations {
+            assert_eq!(crate::pet_expressions::sing_frame(0.15),1);
+            assert_eq!(crate::pet_expressions::sing_frame(1.5),0);
         }
-        let range=|values:Vec<f32>|values.iter().copied().fold(f32::NEG_INFINITY,f32::max)-values.iter().copied().fold(f32::INFINITY,f32::min);
-        assert!((0.6..1.1).contains(&range(heights)),"麦头应有细微起伏");
-        assert!((0.10..0.18).contains(&range(angles)),"麦柄应有轻微转动");
+        let mut pet=Pet::default();
+        pet.step(PetState::Music,1.0,0.2,[0.0;2],true);
+        assert!(pet.expressions.current().is_none(),"演唱段落先播唱歌图，不插入表情");
+        pet.step(PetState::Music,20.0,MUSIC_PERIOD,[0.0;2],true);
+        let expression=pet.expressions.current().expect("唱完一段后插入表情");
+        assert!(Expression::ALL.contains(&expression));
     }
     #[test]
     #[ignore="按需导出听歌状态的实际界面动图"]
     fn listening_expression_gallery(){
         use eframe::egui::{self,Pos2,Rect,Vec2};
         use crate::app::{App,Env,Options,WIN_W,WIN_H};
-        let dest=std::path::PathBuf::from(std::env::var_os("DAOZAI_LISTENING_PREVIEW").expect("需指定预览目录"));
+        let dest=std::path::PathBuf::from(std::env::var_os("YUNYU_LISTENING_PREVIEW").expect("需指定预览目录"));
         std::fs::create_dir_all(&dest).unwrap();
-        std::env::set_var("YUNYU_DATA_DIR",std::env::temp_dir().join(format!("daozai-listening-{}",std::process::id())));
+        std::env::set_var("YUNYU_DATA_DIR",std::env::temp_dir().join(format!("yunyu-listening-{}",std::process::id())));
         let ctx=egui::Context::default();let mut app=App::new(&ctx,Options{fetch_lyrics:false,pet_idle:1e9});
         app.settings.pet=true;app.settings.minimal=false;app.settings.island_lyrics=false;
         let mut scenes=Vec::new();let mut start=0.0;
@@ -163,30 +162,6 @@ fn music_segment_at(age:f32)->MusicSegment {
         time-=expression.duration();
     }
     MusicSegment{pose:MusicPose::Microphone,elapsed:0.0,expression:None}
-}
-
-fn microphone_pose(age:f32)->([f32;2],f32) {
-    ([5.9+(age*0.95).sin()*0.2,20.8+(age*1.35).sin()*0.45],35.0_f32.to_radians()+(age*1.1).sin()*0.07)
-}
-
-fn microphone(c:&Card,cx:f32,y:f32,age:f32){
-    let age=if crate::bar_layout::animations_enabled(){age}else{0.0};
-    let (head,angle)=microphone_pose(age);
-    let point=|s:f32,v:f32|(cx+head[0]+s*angle.cos()-v*angle.sin(),y+head[1]+s*angle.sin()+v*angle.cos());
-    let capsule=|start:f32,end:f32,width:f32,color:Color32|{
-        let a=point(start,0.0);let b=point(end,0.0);
-        c.seg(a,b,width,color);c.circle(a.0,a.1,width/2.0,color);c.circle(b.0,b.1,width/2.0,color);
-    };
-    let line=|a:(f32,f32),b:(f32,f32),width:f32,color:Color32|c.seg(point(a.0,a.1),point(b.0,b.1),width,color);
-    capsule(2.3,7.0,1.9,Color32::from_rgb(176,183,197));
-    capsule(2.5,6.8,1.45,Color32::from_rgb(76,84,101));
-    line((3.4,-0.53),(6.4,-0.53),0.28,Color32::from_rgb(218,225,237));
-    capsule(2.05,2.65,2.6,Color32::from_rgb(126,137,157));
-    let head=point(0.0,0.0);
-    c.circle(head.0,head.1,2.6,Color32::from_rgb(222,228,238));
-    c.circle(head.0,head.1,2.15,Color32::from_rgb(164,176,194));
-    for s in [-1.0f32,0.0,1.0] {let v=(4.0-s*s).sqrt()*0.88;line((s,-v),(s,v),0.32,Color32::from_rgb(92,105,126));}
-    for v in [-1.0f32,0.0,1.0] {let s=(4.0-v*v).sqrt()*0.88;line((-s,v),(s,v),0.3,Color32::from_rgb(226,232,243));}
 }
 
 #[derive(Clone, Copy)]
@@ -316,18 +291,11 @@ impl Pet {
 
     pub fn draw(&mut self, c: &Card, cx: f32, t: f64, palette:Option<crate::skin_paint::Palette>) {
         if self.expressions.draw(c,cx,palette) {return;}
-        for (i, eye) in self.eyes.iter().enumerate() {
-            let x = cx + if i == 0 { -5.6 } else { 5.6 } + self.gaze[0];
-            let y = 14.5 + self.y + eye.y + self.gaze[1];
-            let points: Vec<_> = (0..=12).map(|n| {
-                let q = n as f32 / 6.0 - 1.0;
-                (x + q * eye.spread, y + q * (eye.height / 2.0 + eye.tilt) + (1.0 - q*q) * eye.curve)
-            }).collect();
-            let stroke=if self.state==PetState::Music {3.6-0.8*smoothstep(0.5,1.5,eye.spread.abs())}else{3.6};
-            c.path(&points, stroke, theme::WHITE);
-            // 圆端点保持胶囊眼睛的轮廓。
-            for p in [points[0], points[12]] { c.circle(p.0, p.1, stroke/2.0, theme::WHITE); }
+        if self.state==PetState::Music {
+            self.expressions.draw_sing(c,cx,self.music_age);
+            return;
         }
+        self.expressions.draw_rest(c,cx);
         match self.state {
             PetState::Dozing | PetState::Sleeping => {
                 let bob = ((t as f32 * 1.4).sin() + 1.0) * 0.7;
@@ -343,40 +311,11 @@ impl Pet {
                 }
             },
             PetState::Satisfied => crate::paint::droplet(c,cx+18.0,12.0,5.0,theme::CYAN),
-            PetState::Music => {
-                let segment=music_segment_at(self.music_age);
-                self.draw_music(&c.faded(smoothstep(0.0,1.0,segment.elapsed)),cx,segment.pose);
-            },
             PetState::Worried => {
                 c.fill(cx+17.0,8.0,1.6,4.2,0.8,theme::YELLOW);
                 c.circle(cx+17.8,14.5,0.9,theme::YELLOW);
             },
             _ => {},
-        }
-    }
-
-    fn draw_music(&self,c:&Card,cx:f32,pose:MusicPose){
-        let y=self.y+self.gaze[1];
-        let pulse=(self.music_age*2.0).sin()*0.5+0.5;
-        let mouth=|rx:f32,ry:f32|{
-            let points:Vec<_>=(0..=24).map(|n|{let angle=n as f32/24.0*std::f32::consts::TAU;(cx-0.8+angle.cos()*rx,20.7+y+angle.sin()*ry)}).collect();
-            c.path(&points,0.9,theme::WHITE);
-        };
-        match pose {
-            MusicPose::Microphone=>mouth(1.1,0.8+pulse*0.5),
-            MusicPose::SideSing=>mouth(1.5,0.8+pulse*0.3),
-            MusicPose::HighNote=>mouth(1.7,1.6+pulse*0.5),
-            MusicPose::Hum=>c.path(&[(cx-2.7,20.7+y),(cx-1.8,21.4+y),(cx-0.8,21.0+y),(cx+0.2,21.4+y),(cx+1.1,20.7+y)],0.9,theme::WHITE),
-            MusicPose::Squint=>mouth(1.2,0.4+pulse*0.6),
-            MusicPose::Smile=>c.path(&[(cx-2.5,20.6+y),(cx-1.6,21.6+y),(cx-0.5,21.9+y),(cx+0.6,21.6+y),(cx+1.5,20.6+y)],1.0,theme::WHITE),
-        }
-        if matches!(pose,MusicPose::Microphone|MusicPose::SideSing|MusicPose::HighNote) {
-            microphone(c,cx,y,self.music_age);
-        } else {
-            let y=8.5+(self.music_age*1.4).sin()*0.6;
-            c.seg((cx+16.0,y-3.0),(cx+16.0,y+3.0),1.1,theme::WHITE);
-            c.seg((cx+16.0,y-3.0),(cx+19.0,y-2.0),1.1,theme::WHITE);
-            c.circle(cx+14.8,y+3.0,1.5,theme::WHITE);
         }
     }
 }
