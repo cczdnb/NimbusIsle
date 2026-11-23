@@ -310,7 +310,7 @@ pub struct Settings {
     pub offwork_weekdays: bool,
     /// 下班前多少分钟算「快下班」：倒计时变色。
     pub offwork_soon: u32,
-    /// 打开后用班次专属表情。图还没画好时先不播现有表情顶替。
+    /// 打开后按上下班时段播放专属表情。关掉则用平时的表情。
     pub offwork_own_faces: bool,
     /// 微信、QQ 和系统通知横幅及其铃铛的停留秒数。
     pub notification_dwell_secs: f32,

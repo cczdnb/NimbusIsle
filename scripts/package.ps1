@@ -18,7 +18,7 @@ try {
         try {
             $trimFlags = $privatePaths | ForEach-Object { '"/d1trimfile:' + $_ + '"' }
             $env:CL = (@($originalCL) + $trimFlags) -join ' '
-            cargo +stable-x86_64-pc-windows-msvc build --locked --release --bin yunyu --target x86_64-pc-windows-msvc
+            rustup run 1.100.0-x86_64-pc-windows-msvc cargo build --locked --release --bin yunyu --target x86_64-pc-windows-msvc
             if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
         } finally {
             $env:CL = $originalCL

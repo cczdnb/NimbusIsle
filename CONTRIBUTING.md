@@ -35,6 +35,8 @@ rustup run 1.100.0-x86_64-pc-windows-msvc cargo run --locked --bin yunyu
 | `src/todo_sync/` | 第三方待办同步 |
 | `src/hotkeys.rs` | 全局快捷键 |
 | `src/agent_session.rs`、`src/session_ui.rs` | 本机 Agent 会话的读取和会话页 |
+| `src/pet.rs`、`src/pet_expressions.rs` | 吉祥物、日常表情和唱歌动作 |
+| `src/offwork.rs` | 下班倒计时和专属表情时段 |
 | `src/sys_meter.rs` | 常驻 CPU 与内存 |
 | `src/weather.rs`、`src/qweather.rs` | Open-Meteo 与和风天气 |
 | `src/native.rs`、`src/system.rs` | 原生窗口、输入、拖放和系统事件 |

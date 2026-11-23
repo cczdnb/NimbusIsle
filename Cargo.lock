@@ -4143,7 +4143,7 @@ dependencies = [
 
 [[package]]
 name = "yunyu"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
