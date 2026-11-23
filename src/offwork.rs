@@ -1,4 +1,4 @@
-//! 下班倒计时。只按本机设置：固定下班钟点，或自己记下的上班时间加工时。
+//! 下班倒计时。只按本机设置的上班和下班钟点。
 
 use chrono::{Datelike, NaiveTime, Offset as _, TimeZone};
 use eframe::egui::Color32;
@@ -10,6 +10,7 @@ use crate::theme::{self, W};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Rule {
     pub enabled: bool,
+    pub fixed_start: u32,
     pub fixed_end: u32,
     pub weekdays: bool,
     /// 剩余少于此分钟数时，倒计时变色。
@@ -20,6 +21,7 @@ impl Rule {
     pub(crate) fn from_settings(s: &Settings) -> Self {
         Self {
             enabled: s.offwork,
+            fixed_start: s.offwork_start.min(1439),
             fixed_end: s.offwork_end.min(1439),
             weekdays: s.offwork_weekdays,
             soon: s.offwork_soon.clamp(5, 120),
@@ -38,7 +40,6 @@ pub(crate) enum Phase {
 enum Tone {
     Plain,
     Soon,
-    Go,
     Mute,
 }
 
@@ -58,7 +59,7 @@ impl Phase {
                     tone: if remain <= soon_secs { Tone::Soon } else { Tone::Plain },
                 }
             }
-            Phase::Ready { .. } => Chip { text: "可走".into(), tone: Tone::Go },
+            Phase::Ready { .. } => Chip { text: String::new(), tone: Tone::Mute },
         }
     }
 }
@@ -103,7 +104,7 @@ where
         Phase::Hidden if !rule.enabled => "下班倒计时关着。".into(),
         Phase::Hidden => "周末不显示。工作日会回到岛上。".into(),
         Phase::Counting { leave_at, remain } => format!("{} 下班，还剩 {}", hm(now, *leave_at), remain_text(*remain)),
-        Phase::Ready { leave_at } => format!("{} 已到，可以走了", hm(now, *leave_at)),
+        Phase::Ready { leave_at } => format!("{} 已到，倒计时已收起", hm(now, *leave_at)),
     }
 }
 
@@ -130,13 +131,135 @@ fn remain_text(secs: i64) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Band {
+    White,
+    Yellow,
+    Orange,
+    Red,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Segment {
+    band: Band,
+    /// 已过为 1，未到为 0，当前这一格是这一小时里走过的比例。
+    fill: f32,
+    span: i64,
+}
+
+fn band_for(remain_secs: i64) -> Band {
+    if remain_secs > 3 * 3600 {
+        Band::White
+    } else if remain_secs > 2 * 3600 {
+        Band::Yellow
+    } else if remain_secs > 3600 {
+        Band::Orange
+    } else {
+        Band::Red
+    }
+}
+
+fn segments<Tz: TimeZone>(now: &chrono::DateTime<Tz>, rule: &Rule) -> Vec<Segment>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let start = rule.fixed_start.min(1439);
+    let end = rule.fixed_end.min(1439);
+    if start >= end {
+        return Vec::new();
+    }
+    let (Some(start_at), Some(end_at)) = (at_minutes(now, start), at_minutes(now, end)) else {
+        return Vec::new();
+    };
+    if end_at <= start_at {
+        return Vec::new();
+    }
+    let now_at = now.timestamp();
+    let mut cells = Vec::new();
+    let mut cursor = start_at;
+    while cursor < end_at {
+        let next = (cursor + 3600).min(end_at);
+        let span = next - cursor;
+        let fill = if now_at <= cursor {
+            0.0
+        } else if now_at >= next {
+            1.0
+        } else {
+            (now_at - cursor) as f32 / span as f32
+        };
+        cells.push(Segment { band: band_for(end_at - cursor), fill, span });
+        cursor = next;
+    }
+    cells
+}
+
+fn band_color(band: Band) -> Color32 {
+    match band {
+        Band::White => theme::WHITE,
+        Band::Yellow => theme::YELLOW,
+        Band::Orange => theme::ORANGE,
+        Band::Red => theme::RED,
+    }
+}
+
+/// 整条进度的填充宽度。按每格的实际时长加权，不会超出槽宽。
+fn progress_width(width: f32, cells: &[Segment]) -> f32 {
+    let span: i64 = cells.iter().map(|cell| cell.span).sum();
+    if width < 8.0 || span <= 0 {
+        return 0.0;
+    }
+    let done: f32 = cells.iter().map(|cell| cell.fill.clamp(0.0, 1.0) * cell.span as f32).sum();
+    (width * done / span as f32).clamp(0.0, width)
+}
+
+fn current_band(cells: &[Segment]) -> Option<Band> {
+    cells.iter().find(|cell| cell.fill < 1.0).map(|cell| cell.band).or_else(|| cells.last().map(|cell| cell.band))
+}
+
+fn paint_hour_bar(view: &Card, x: f32, width: f32, cells: &[Segment]) {
+    let filled = progress_width(width, cells);
+    if cells.is_empty() || width < 8.0 {
+        return;
+    }
+    let h = 4.0;
+    let y = 21.0;
+    let left = x - width / 2.0;
+    view.fill(left, y, width, h, h / 2.0, Color32::from_white_alpha(48));
+    if filled <= 0.0 {
+        return;
+    }
+    let Some(band) = current_band(cells) else { return };
+    view.fill(left, y, filled.max(h).min(width), h, h / 2.0, band_color(band));
+}
+
 fn tone_color(tone: Tone) -> Color32 {
     match tone {
         Tone::Plain => theme::WHITE,
         Tone::Soon => theme::YELLOW,
-        Tone::Go => theme::GREEN,
         Tone::Mute => theme::GRAY,
     }
+}
+
+const FINALE_HOLD: f64 = 4.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Finale {
+    Idle,
+    Seconds,
+    Go { until: f64 },
+    Done,
+}
+
+impl Default for Finale {
+    fn default() -> Self { Self::Idle }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum FinaleCaption {
+    #[default]
+    None,
+    Seconds(i64),
+    Go,
 }
 
 #[derive(Default)]
@@ -145,6 +268,9 @@ pub(crate) struct Runtime {
     mood_arrived: bool,
     mood_done: bool,
     soon_beat: i64,
+    finale_day: String,
+    finale: Finale,
+    caption: FinaleCaption,
 }
 
 impl Runtime {
@@ -159,7 +285,7 @@ impl crate::app::App {
     }
 
     pub(crate) fn offwork_live(&self) -> bool {
-        self.settings.offwork && !matches!(self.offwork_phase(), Phase::Hidden) && !self.effective_minimal()
+        self.settings.offwork && matches!(self.offwork_phase(), Phase::Counting { .. }) && !self.effective_minimal()
     }
 
     pub(crate) fn offwork_status(&self) -> String {
@@ -234,6 +360,9 @@ impl crate::app::App {
 
     pub(crate) fn paint_offwork(&mut self, c: &Card, x: f32, width: f32, alpha: f32, interactive: bool) {
         let (current, chip) = self.chip_now();
+        if !matches!(current, Phase::Counting { .. }) {
+            return;
+        }
         let mut view = c.faded(alpha);
         if alpha < 0.8 {
             view = view.ghost();
@@ -241,11 +370,13 @@ impl crate::app::App {
         let color = tone_color(chip.tone);
         let size = 12.0;
         let text_w = view.text_w(&chip.text, size, W::Bold);
-        view.text(x - text_w / 2.0, 20.0, &chip.text, size, W::Bold, color, H::Left);
+        view.text(x - text_w / 2.0, 17.0, &chip.text, size, W::Bold, color, H::Left);
+        let now = chrono::Local::now();
+        let cells = segments(&now, &Rule::from_settings(&self.settings));
+        paint_hour_bar(&view, x, width, &cells);
         if alpha < 0.05 {
             return;
         }
-        let now = chrono::Local::now();
         let tip = describe(&now, &Rule::from_settings(&self.settings), &current);
         let id = if interactive { "offwork-pill" } else { "offwork-preview" };
         let hit = view.hit(x - width / 2.0, 2.0, width, 26.0, id);
@@ -254,6 +385,9 @@ impl crate::app::App {
 
     pub(crate) fn paint_offwork_side(&mut self, c: &Card, cx: f32, mid: f32) {
         let (current, chip) = self.chip_now();
+        if !matches!(current, Phase::Counting { .. }) {
+            return;
+        }
         let color = tone_color(chip.tone);
         let (head, secs) = split_hms(&chip.text);
         if secs.is_empty() {
@@ -266,6 +400,100 @@ impl crate::app::App {
         let tip = describe(&now, &Rule::from_settings(&self.settings), &current);
         let hit = c.hit(cx - 16.0, mid - 16.0, 32.0, 32.0, "offwork-side");
         let _ = crate::quota_ui::bar_tooltip(hit, tip);
+    }
+
+    pub(crate) fn advance_offwork_finale(&mut self, ctx: &eframe::egui::Context) {
+        if !self.settings.offwork {
+            self.offwork.finale = Finale::Idle;
+            self.offwork.caption = FinaleCaption::None;
+            return;
+        }
+        let visible = !self.open && !self.side() && !self.nudge_active()
+            && !(self.notice.is_some() && !self.compact_notices())
+            && !self.effective_minimal();
+        let now = chrono::Local::now();
+        let shown = phase(&now, &Rule::from_settings(&self.settings));
+        let day = now.format("%Y-%m-%d").to_string();
+        let (state, caption) = step_finale(self.offwork.finale, &self.offwork.finale_day, &day, &shown, self.t, visible);
+        self.offwork.finale_day = day;
+        self.offwork.finale = state;
+        self.offwork.caption = caption;
+        if caption != FinaleCaption::None {
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
+
+    pub(crate) fn offwork_finale_showing(&self) -> bool {
+        self.offwork.caption != FinaleCaption::None
+    }
+
+    pub(crate) fn offwork_finale_size(&self) -> Option<(f32, f32)> {
+        self.offwork_finale_showing().then_some((FINALE_W, FINALE_IMAGE_H + FINALE_TEXT_H))
+    }
+
+    pub(crate) fn paint_offwork_finale(&self, ui: &eframe::egui::Ui, painter: &eframe::egui::Painter, panel: eframe::egui::Rect, flare: f32, flare_h: f32, radius: f32, feather: f32) {
+        let label = match self.offwork.caption {
+            FinaleCaption::Seconds(remain) => remain.to_string(),
+            FinaleCaption::Go => "GOGOGO".to_string(),
+            FinaleCaption::None => return,
+        };
+        crate::shape::fill(painter, panel, flare, flare_h, radius, Color32::WHITE, feather);
+        let card = Card::new(ui, panel.min, panel);
+        let texture = finale_texture(ui.ctx());
+        let image_h = (panel.height() - FINALE_TEXT_H).max(1.0);
+        card.painter.image(
+            texture.id(),
+            card.rect(0.0, 0.0, panel.width(), image_h),
+            eframe::egui::Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        painter.text(
+            eframe::egui::pos2(panel.center().x, panel.bottom() - FINALE_TEXT_H / 2.0),
+            eframe::egui::Align2::CENTER_CENTER,
+            &label,
+            theme::font(28.0, W::Bold),
+            Color32::BLACK,
+        );
+    }
+}
+
+const FINALE_W: f32 = 240.0;
+const FINALE_IMAGE_H: f32 = 240.0 * 393.0 / 566.0;
+const FINALE_TEXT_H: f32 = 36.0;
+
+fn finale_texture(ctx: &eframe::egui::Context) -> eframe::egui::TextureHandle {
+    let key = eframe::egui::Id::new("offwork-finale");
+    if let Some(texture) = ctx.data(|data| data.get_temp::<eframe::egui::TextureHandle>(key)) {
+        return texture;
+    }
+    let decoded = image::load_from_memory(include_bytes!("../assets/pet/offwork-end.png")).expect("下班倒计时结束图").into_rgba8();
+    let image = eframe::egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize, decoded.height() as usize], decoded.as_raw());
+    let texture = ctx.load_texture("offwork-finale", image, eframe::egui::TextureOptions::LINEAR);
+    crate::skin_paint::mark_colored(texture.id());
+    ctx.data_mut(|data| data.insert_temp(key, texture.clone()));
+    texture
+}
+
+fn step_finale(mut state: Finale, stored_day: &str, day: &str, shown: &Phase, now: f64, visible: bool) -> (Finale, FinaleCaption) {
+    if stored_day != day {
+        state = Finale::Idle;
+    }
+    let remain = match shown {
+        Phase::Counting { remain, .. } if *remain > 0 => Some(*remain),
+        Phase::Ready { .. } => Some(0),
+        Phase::Hidden | Phase::Counting { .. } => None,
+    };
+    match (state, remain) {
+        (Finale::Done, _) => (Finale::Done, FinaleCaption::None),
+        (Finale::Go { until }, _) if now >= until => (Finale::Done, FinaleCaption::None),
+        (Finale::Go { until }, _) => (Finale::Go { until }, if visible { FinaleCaption::Go } else { FinaleCaption::None }),
+        (_, None) => (Finale::Idle, FinaleCaption::None),
+        (_, Some(remain)) if remain > 60 => (Finale::Idle, FinaleCaption::None),
+        (Finale::Seconds, Some(0)) if visible => (Finale::Go { until: now + FINALE_HOLD }, FinaleCaption::Go),
+        (Finale::Seconds, Some(0)) => (Finale::Done, FinaleCaption::None),
+        (_, Some(0)) => (Finale::Idle, FinaleCaption::None),
+        (state, Some(_)) if !visible => (state, FinaleCaption::None),
+        (_, Some(remain)) => (Finale::Seconds, FinaleCaption::Seconds(remain)),
     }
 }
 
@@ -282,7 +510,7 @@ mod tests {
     use chrono::{FixedOffset, TimeZone};
 
     fn rule() -> Rule {
-        Rule { enabled: true, fixed_end: 18 * 60, weekdays: true, soon: 30 }
+        Rule { enabled: true, fixed_start: 9 * 60, fixed_end: 18 * 60, weekdays: true, soon: 30 }
     }
 
     fn at(day: u32, h: u32, m: u32, s: u32) -> chrono::DateTime<FixedOffset> {
@@ -330,6 +558,141 @@ mod tests {
     }
 
     #[test]
+    fn finished_countdown_leaves_the_island() {
+        let rule = rule();
+        let shown = phase(&at(18, 18, 0, 1), &rule);
+        assert!(matches!(shown, Phase::Ready { .. }));
+        let chip = shown.chip(30 * 60);
+        assert!(chip.text.is_empty());
+        assert!(!chip.text.contains("可走"));
+        assert!(!describe(&at(18, 18, 0, 1), &rule, &shown).contains("可走"));
+    }
+
+    #[test]
+    fn hour_cells_follow_the_configured_shift() {
+        let rule = rule();
+        let morning = segments(&at(18, 8, 0, 0), &rule);
+        assert_eq!(morning.len(), 9);
+        assert!(morning.iter().all(|cell| cell.fill == 0.0), "上班前九格都是空槽");
+        assert_eq!(morning[6].band, Band::Yellow, "15:00 进入时还剩 3 小时");
+        assert_eq!(morning[7].band, Band::Orange, "16:00 进入时还剩 2 小时");
+        assert_eq!(morning[8].band, Band::Red, "17:00 进入时还剩 1 小时");
+        assert!(morning[..6].iter().all(|cell| cell.band == Band::White));
+
+        let mid = segments(&at(18, 10, 30, 0), &rule);
+        assert_eq!(mid[0].fill, 1.0);
+        assert!((mid[1].fill - 0.5).abs() < 0.001);
+        assert!(mid[2..].iter().all(|cell| cell.fill == 0.0));
+
+        let mut short = rule.clone();
+        short.fixed_start = 16 * 60;
+        let late = segments(&at(18, 16, 30, 0), &short);
+        assert_eq!(late.len(), 2);
+        assert_eq!(late[0].band, Band::Orange);
+        assert!((late[0].fill - 0.5).abs() < 0.001);
+        assert_eq!(late[1].band, Band::Red);
+        assert_eq!(late[1].fill, 0.0);
+        assert!(!late.iter().any(|cell| matches!(cell.band, Band::White | Band::Yellow)));
+
+        let mut tail = rule.clone();
+        tail.fixed_end = 18 * 60 + 30;
+        let ending = segments(&at(18, 18, 10, 0), &tail);
+        assert_eq!(ending.len(), 10);
+        assert_eq!(ending[9].band, Band::Red);
+        assert!((ending[9].fill - 10.0 / 30.0).abs() < 0.001, "末尾半小时按自己的长度填充");
+    }
+
+    #[test]
+    fn hour_bar_stays_inside_the_existing_slot() {
+        let rule = rule();
+        let morning = segments(&at(18, 8, 0, 0), &rule);
+        assert_eq!(progress_width(72.0, &morning), 0.0, "上班前进度条是空的");
+        let mid = segments(&at(18, 10, 30, 0), &rule);
+        let filled = progress_width(72.0, &mid);
+        assert!(filled > 72.0 * 1.0 / 9.0 && filled < 72.0 * 2.0 / 9.0, "10:30 应走完一小时再加半小时，实际 {filled}");
+        assert!(filled <= 72.0);
+        let done = Segment { band: Band::Red, fill: 1.0, span: 3600 };
+        assert!((progress_width(72.0, &[done]) - 72.0).abs() < 0.01);
+        assert_eq!(progress_width(72.0, &[]), 0.0);
+    }
+
+    #[test]
+    fn start_that_is_not_before_the_end_draws_no_cells() {
+        let mut rule = rule();
+        rule.fixed_start = 18 * 60;
+        assert!(segments(&at(18, 12, 0, 0), &rule).is_empty());
+        rule.fixed_start = 19 * 60;
+        assert!(segments(&at(18, 12, 0, 0), &rule).is_empty());
+        match phase(&at(18, 12, 0, 0), &rule) {
+            Phase::Counting { leave_at, .. } => assert_eq!(leave_at, ts(18, 18, 0)),
+            other => panic!("格子画不出来时，数字仍倒计时到下班：{other:?}"),
+        }
+    }
+
+    fn counting(remain: i64) -> Phase {
+        Phase::Counting { leave_at: 0, remain }
+    }
+
+    fn finale(state: Finale, shown: &Phase, now: f64, visible: bool) -> (Finale, FinaleCaption) {
+        step_finale(state, "2026-11-20", "2026-11-20", shown, now, visible)
+    }
+
+    #[test]
+    fn last_minute_card_follows_the_remaining_seconds() {
+        let (state, caption) = finale(Finale::Idle, &counting(61), 0.0, true);
+        assert_eq!(state, Finale::Idle);
+        assert_eq!(caption, FinaleCaption::None);
+
+        let (state, caption) = finale(Finale::Idle, &counting(60), 0.0, true);
+        assert_eq!(state, Finale::Seconds);
+        assert_eq!(caption, FinaleCaption::Seconds(60));
+
+        let (state, caption) = finale(Finale::Idle, &counting(37), 0.0, true);
+        assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::Seconds(37)), "中途打开从剩下的秒数开始");
+
+        let (state, caption) = finale(Finale::Idle, &counting(37), 0.0, false);
+        assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "这一分钟被挡住时先不拉开");
+
+        let (state, caption) = finale(Finale::Seconds, &counting(20), 0.0, true);
+        assert_eq!(caption, FinaleCaption::Seconds(20));
+        assert_eq!(state, Finale::Seconds);
+    }
+
+    #[test]
+    fn gogogo_holds_then_ends_once() {
+        let ready = Phase::Ready { leave_at: 0 };
+        let (state, caption) = finale(Finale::Seconds, &ready, 10.0, true);
+        assert_eq!(caption, FinaleCaption::Go);
+        let Finale::Go { until } = state else { panic!("走到 0 应进入 GOGOGO") };
+        assert!((until - 14.0).abs() < 0.001);
+
+        let (state, caption) = finale(Finale::Go { until }, &ready, 13.9, true);
+        assert_eq!((state, caption), (Finale::Go { until }, FinaleCaption::Go));
+        let (state, caption) = finale(Finale::Go { until }, &ready, 14.0, true);
+        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None));
+
+        let (state, caption) = finale(Finale::Done, &counting(30), 20.0, true);
+        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "同一天不再重播");
+
+        let (state, caption) = step_finale(Finale::Done, "2026-11-19", "2026-11-20", &counting(8 * 3600), 0.0, true);
+        assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "第二天重新开始");
+    }
+
+    #[test]
+    fn missing_the_last_minute_does_not_replay() {
+        let ready = Phase::Ready { leave_at: 0 };
+        let (state, caption) = finale(Finale::Idle, &ready, 10.0, true);
+        assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "已经到点再打开不补播");
+
+        let (state, caption) = finale(Finale::Seconds, &counting(8), 10.0, false);
+        assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::None));
+        let (state, caption) = finale(state, &ready, 11.0, false);
+        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "被挡住直到结束就不再补 GOGOGO");
+        let (state, caption) = finale(state, &ready, 12.0, true);
+        assert_eq!(caption, FinaleCaption::None);
+    }
+
+    #[test]
     fn offwork_settings_roundtrip_stays_on_this_machine() {
         let _guard = crate::ui_tests::ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let dir = std::env::temp_dir().join(format!("yunyu-offwork-{}", std::process::id()));
@@ -349,11 +712,13 @@ mod tests {
         let _restore = Restore(old);
         let mut settings = Settings::default();
         settings.offwork = true;
+        settings.offwork_start = 9 * 60 + 15;
         settings.offwork_end = 18 * 60 + 30;
         settings.offwork_weekdays = false;
         settings.save();
         let loaded = Settings::load();
         assert!(loaded.offwork);
+        assert_eq!(loaded.offwork_start, 9 * 60 + 15);
         assert_eq!(loaded.offwork_end, 18 * 60 + 30);
         assert!(!loaded.offwork_weekdays);
         let text = std::fs::read_to_string(dir.join("settings.txt")).unwrap();

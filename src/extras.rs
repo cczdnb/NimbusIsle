@@ -1276,8 +1276,9 @@ fn number_stepper<N:egui::emath::Numeric>(ui:&mut egui::Ui,value:&mut N,min:N,ma
     });
     changed
 }
-/// 时刻加减器（一天中的分钟数，15 分钟一档，跨午夜循环），中间可直接输入 12:30。
-fn time_stepper(ui:&mut egui::Ui,value:&mut u32,id:&str)->bool{
+/// 时刻加减器（一天中的分钟数，按 `step` 分钟一档，跨午夜循环），中间可直接输入 12:30。
+fn time_stepper(ui:&mut egui::Ui,value:&mut u32,id:&str,step:u32)->bool{
+    let step=step.clamp(1,60);
     let ctx=&ui.ctx().clone();
     let mut changed=false;
     ui.push_id(id,|ui|{
@@ -1285,12 +1286,12 @@ fn time_stepper(ui:&mut egui::Ui,value:&mut u32,id:&str)->bool{
         ui.spacing_mut().button_padding=egui::vec2(4.0,2.0);
         let button=|text|egui::Button::new(egui::RichText::new(text).size(16.0).color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))))
             .fill(settings_color(ctx,Color32::from_rgb(48,48,51),Color32::from_rgb(229,232,238))).stroke(egui::Stroke::NONE).corner_radius(13.0);
-        if ui.add(button("−").min_size(egui::vec2(26.0,26.0))).on_hover_text("提前 15 分钟").clicked(){*value=(*value+1440-15)%1440;changed=true;}
-        let field=ui.add_sized([56.0,28.0],egui::DragValue::new(value).range(0..=1439).speed(1.0)
+        if ui.add(button("−").min_size(egui::vec2(26.0,26.0))).on_hover_text(format!("提前 {step} 分钟")).clicked(){*value=(*value+1440-step)%1440;changed=true;}
+        let field=ui.add_sized([56.0,28.0],egui::DragValue::new(value).range(0..=1439).speed(step as f64)
             .custom_formatter(|v,_|{let m=v as u32;format!("{:02}:{:02}",m/60,m%60)})
             .custom_parser(|t|{let (h,m)=t.trim().split_once([':','：'])?;Some((h.parse::<u32>().ok()?.min(23)*60+m.parse::<u32>().ok()?.min(59)) as f64)}));
         changed|=field.changed();
-        if ui.add(button("+").min_size(egui::vec2(26.0,26.0))).on_hover_text("推后 15 分钟").clicked(){*value=(*value+15)%1440;changed=true;}
+        if ui.add(button("+").min_size(egui::vec2(26.0,26.0))).on_hover_text(format!("推后 {step} 分钟")).clicked(){*value=(*value+step)%1440;changed=true;}
     });
     changed
 }
@@ -1312,7 +1313,12 @@ impl App {
             return;
         }
         ui.separator();
-        settings_control_row_right(ui,"下班时间",|ui|{time_stepper(ui,&mut self.settings.offwork_end,"offwork-end");});
+        settings_control_row_right(ui,"上班时间",|ui|{time_stepper(ui,&mut self.settings.offwork_start,"offwork-start",1);});
+        ui.separator();
+        settings_control_row_right(ui,"下班时间",|ui|{time_stepper(ui,&mut self.settings.offwork_end,"offwork-end",1);});
+        if self.settings.offwork_start.min(1439) >= self.settings.offwork_end.min(1439) {
+            settings_hint(ui,"上班时间要早于下班时间，否则不画小时格子。");
+        }
         ui.separator();
         setting_number(ui,"快下班",&mut self.settings.offwork_soon,5,120," 分钟",5.0);
         ui.separator();
@@ -1808,9 +1814,9 @@ impl App {
                                 settings_control_row(ui,"午休时间",80.0,|ui|{
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                                         ui.allocate_ui_with_layout(egui::vec2(252.0,30.0),egui::Layout::left_to_right(egui::Align::Center),|ui|{
-                                            time_stepper(ui,&mut self.settings.lunch_start,"lunch-start");
+                                            time_stepper(ui,&mut self.settings.lunch_start,"lunch-start",15);
                                             ui.label("至");
-                                            time_stepper(ui,&mut self.settings.lunch_end,"lunch-end");
+                                            time_stepper(ui,&mut self.settings.lunch_end,"lunch-end",15);
                                         });
                                     }).response
                                 });

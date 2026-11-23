@@ -1,9 +1,11 @@
-//! 天气页上的两段场景：落雨和落雪。
+//! 落雨和落雪：天气页上铺一层，岛体里也铺一层。
 //! 素材来自 LottieFiles，许可证是 Lottie Simple License，见 `assets/weather/LICENSE.txt`。
 //! 预览图自带蓝色底，解码时把蓝底抠掉，只留下雨丝和雪花。
+use crate::model::Dock;
 use crate::paint::Card;
+use crate::shape::{self, EdgeMap};
 use crate::weather::Kind;
-use eframe::egui::{self, Color32};
+use eframe::egui::{self, Color32, Pos2, Rect};
 use image::AnimationDecoder;
 use std::io::Cursor;
 use std::sync::OnceLock;
@@ -70,7 +72,7 @@ fn frame_index(clip: &Clip, t: f32) -> usize {
     clip.frames.len() - 1
 }
 
-pub(crate) fn paint(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32)) {
+fn texture(ctx: &egui::Context, kind: Kind, t: f32) -> egui::TextureHandle {
     let snow = kind == Kind::Snow;
     let clip = clip(snow);
     let index = frame_index(clip, t);
@@ -80,20 +82,32 @@ pub(crate) fn paint(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32)) {
         frame.as_raw(),
     );
     let id = egui::Id::new(("weather-scene-frame", snow));
-    let ctx = c.ui.ctx();
-    let texture = ctx.data(|data| data.get_temp::<(usize, egui::TextureHandle)>(id));
-    let texture = if let Some((shown, mut texture)) = texture {
+    let existing = ctx.data(|data| data.get_temp::<(usize, egui::TextureHandle)>(id));
+    if let Some((shown, mut texture)) = existing {
         if shown != index {
-            texture.set(image, egui::TextureOptions::LINEAR);
+            texture.set(image, texture_options());
             ctx.data_mut(|data| data.insert_temp(id, (index, texture.clone())));
         }
         texture
     } else {
-        let texture = ctx.load_texture(if snow { "weather-snow" } else { "weather-rain" }, image, egui::TextureOptions::LINEAR);
+        let texture = ctx.load_texture(if snow { "weather-snow" } else { "weather-rain" }, image, texture_options());
         crate::skin_paint::mark_colored(texture.id());
         ctx.data_mut(|data| data.insert_temp(id, (index, texture.clone())));
         texture
-    };
+    }
+}
+
+fn texture_options() -> egui::TextureOptions {
+    egui::TextureOptions {
+        magnification: egui::TextureFilter::Linear,
+        minification: egui::TextureFilter::Linear,
+        wrap_mode: egui::TextureWrapMode::Repeat,
+        mipmap_mode: None,
+    }
+}
+
+pub(crate) fn paint(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32)) {
+    let texture = texture(c.ui.ctx(), kind, t);
     let (x, y, w, h) = area;
     let scene = c.clipped(x, y, w, h);
     scene.painter.image(
@@ -102,6 +116,51 @@ pub(crate) fn paint(c: &Card, kind: Kind, t: f32, area: (f32, f32, f32, f32)) {
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         Color32::WHITE,
     );
+}
+
+/// 岛体轮廓里铺一层。按岛的短边取纹理比例，雨丝保持竖直，不压成横线。
+pub(crate) fn paint_island(painter: &egui::Painter, ctx: &egui::Context, kind: Kind, t: f32, rect: Rect, pill: bool, dock: Dock, flare: f32, flare_h: f32, radius: f32) {
+    if !covers(kind) || rect.width() < 16.0 || rect.height() < 8.0 { return; }
+    let texture = texture(ctx, kind, t);
+    let (rows, map, frame) = island_rows(rect, pill, dock, flare, flare_h, radius);
+    if rows.len() < 2 { return; }
+    let span = frame.height().clamp(96.0, 220.0);
+    let mut mesh = egui::Mesh::default();
+    mesh.texture_id = texture.id();
+    let tint = Color32::from_white_alpha(210);
+    for pair in rows.windows(2) {
+        let (ya, la, ra) = pair[0];
+        let (yb, lb, rb) = pair[1];
+        let id = mesh.vertices.len() as u32;
+        for (x, y) in [(la, ya), (ra, ya), (rb, yb), (lb, yb)] {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: map.apply(Pos2::new(x, y)),
+                uv: egui::pos2((x - frame.left()) / span, (y - frame.top()) / span),
+                color: tint,
+            });
+        }
+        mesh.add_triangle(id, id + 1, id + 2);
+        mesh.add_triangle(id, id + 2, id + 3);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn island_rows(rect: Rect, pill: bool, dock: Dock, flare: f32, flare_h: f32, radius: f32) -> (Vec<(f32, f32, f32)>, EdgeMap, Rect) {
+    if pill {
+        let radius = rect.height().min(rect.width()) * 0.5;
+        let mid = rect.center().y;
+        let mut rows = Vec::with_capacity(25);
+        for i in 0..=24 {
+            let y = rect.top() + rect.height() * i as f32 / 24.0;
+            let dy = (y - mid).abs().min(radius);
+            let inset = radius - (radius * radius - dy * dy).max(0.0).sqrt();
+            rows.push((y, rect.left() + inset, rect.right() - inset));
+        }
+        (rows, EdgeMap::TOP, rect)
+    } else {
+        let (map, frame) = EdgeMap::of(rect, dock);
+        (shape::sections(frame, flare, flare_h, radius), map, frame)
+    }
 }
 
 #[cfg(test)]

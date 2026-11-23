@@ -1282,7 +1282,7 @@ impl App {
         ui.add_space(8.0);
         settings_label(ui,"动效");
         settings_card(ui,|ui|{
-            setting_row(ui,"天气动效","下雨落下雨丝，下雪飘雪花，晴天保留阳光闪光。关闭后天气页保持静止。",&mut self.settings.weather_scene);
+            setting_row(ui,"天气动效","收起的岛和天气页都会跟着变：下雨落雨丝，下雪飘雪花，晴天在天气页有阳光闪光。关闭后都保持静止。",&mut self.settings.weather_scene);
         });
         ui.add_space(12.0);
         if self.weather_source.selected==crate::weather_source_ui::Provider::Qweather {

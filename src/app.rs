@@ -2013,6 +2013,9 @@ impl App {
         if !self.compact_notices()&&!self.open {
             if let Some(a)=&self.notice {let (width,height)=self.notice_size(a);return (width+self.pet_space(),height);}
         }
+        if !self.open && !self.side() {
+            if let Some(size)=self.offwork_finale_size() {return size;}
+        }
         if self.side() {
             // 左右停靠：竖向胶囊（通知仍是贴边滑出的横向卡片，见上）。
             return self.side_base_size(self.effective_minimal()&&self.t>=self.notification_bell_until);
@@ -2085,6 +2088,7 @@ impl App {
             self.forced_open_until=0.0;
         }
         self.browser_minimal_active=browser_minimal;
+        self.advance_offwork_finale(&ctx);
         if !self.started {
             self.started = true;
             self.last_input = env.t;
@@ -2260,7 +2264,7 @@ impl App {
             }
         } else {self.wheel_delta=0.0;}
         let volume_dragging=self.music_volume_open && ctx.is_being_dragged(egui::Id::new(("card-drag",true,"m-volume-track")));
-        let want = (inside && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || volume_dragging || (self.is_editing() && self.open);
+        let want = (inside && !self.offwork_finale_showing() && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || volume_dragging || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
         self.place_pet(win, env, dt);
         self.update_pet(env, cx);
@@ -2346,6 +2350,15 @@ impl App {
             crate::liquid_glass::apply_exclusion(hwnd, false);
         }
         self.paint_body(&painter, body, flare, flare_h, radius, feather);
+        if !minimal_pill && self.settings.weather_scene && crate::bar_layout::animations_enabled() {
+            if let Some(snapshot)=self.weather.snapshot.as_ref() {
+                let kind=crate::weather::kind(snapshot.code,snapshot.day);
+                if crate::weather_scene::covers(kind) {
+                    crate::weather_scene::paint_island(&painter,&ctx,kind,self.t as f32,panel,pill,self.dock(),flare,flare_h,radius);
+                    ctx.request_repaint_after(std::time::Duration::from_millis(40));
+                }
+            }
+        }
         if lifted > 0.01 {self.paint_lift_halo(&painter, body, flare, flare_h, radius, lifted.min(1.0));}
         let center_guide=self.paint_center_rim(&painter, body, panel, flare, flare_h, radius, env.screen);
         let content_from=crate::skin_paint::shape_count(&ctx,layer);
@@ -2378,6 +2391,10 @@ impl App {
             self.draw_todo_nudge(&Card::new(ui,panel.min+Vec2::new(self.pet_space(),0.0),panel.intersect(ui.max_rect())), panel, true);
         }else if banner {
             if let Some(a)=self.notice.clone(){self.draw_notice(&Card::new(ui,panel.min+Vec2::new(self.pet_space(),0.0),panel.intersect(ui.max_rect())),panel,&a,&mut cmds);}
+        }else if self.offwork_finale_showing() {
+            let from=crate::skin_paint::shape_count(&ctx,layer);
+            self.paint_offwork_finale(ui,&painter,panel,flare,flare_h,radius,feather);
+            keep_colors.push((from,crate::skin_paint::shape_count(&ctx,layer)));
         }else if !minimal_pill || pc > 0.0 {
             self.resident_header(&base, panel, cx, if restoring_lyrics{0.0}else{pc}, reveal, env);
         }
@@ -2425,7 +2442,7 @@ impl App {
             if ctx.input(|i|i.pointer.any_pressed()&&i.pointer.interact_pos().is_some_and(|p|!rect.contains(p)&&!notice_rect.is_some_and(|r|r.contains(p)))){self.notice_details=false;}
         }
         let pet_alpha=self.pet_a*(1.0-smoothstep(0.0,0.3,pc));
-        let pet_sprite=if pet_alpha>0.004 && !minimal_pill {
+        let pet_sprite=if pet_alpha>0.004 && !minimal_pill && !self.offwork_finale_showing() {
             if self.pet_in_slot() {
                 // 播放中加高后吉祥物仍贴在原来的顶行，不要被垂直居中拉到两行中间。
                 let y=if self.auto_now_playing() && p < 0.2 {0.0} else {(h.min(self.base_size().1)-BAR_H).max(0.0)/2.0};
