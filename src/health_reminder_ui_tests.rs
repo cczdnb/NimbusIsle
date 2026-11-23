@@ -141,8 +141,8 @@ fn health_entering_fullscreen_clears_active_and_queued_popups_only(){
     let health=|alert:&crate::extras::Alert|alert.health().is_some();
     assert!(!h.app.notice.as_ref().is_some_and(health) && !h.app.hud_notice.as_ref().is_some_and(health),"全屏隐藏时清除正在显示的健康横幅");
     assert!(!h.app.alerts.iter().any(health),"健康提醒不能留在弹窗队列里等退出后重播");
-    assert!(!h.cmds.iter().any(|cmd|matches!(cmd,crate::app::Cmd::Notify(title,_)if title=="喝水时间到了" || title==crate::app::SIT_TITLE)),"尚未发出的健康系统通知也要抑制");
-    assert!(h.cmds.iter().any(|cmd|matches!(cmd,crate::app::Cmd::Notify(title,_)if title=="待办到时间了")),"其他类型提醒沿用原有逻辑");
+    assert!(!h.cmds.iter().any(|cmd|matches!(cmd,crate::app::Cmd::Notify(title,..)if title=="喝水时间到了" || title==crate::app::SIT_TITLE)),"尚未发出的健康系统通知也要抑制");
+    assert!(h.cmds.iter().any(|cmd|matches!(cmd,crate::app::Cmd::Notify(title,..)if title=="待办到时间了")),"其他类型提醒沿用原有逻辑");
     assert_eq!(h.app.health_pending,[true,true]);
     h.fullscreen=false;h.frame(vec![]);
     assert!(!h.app.notice.as_ref().is_some_and(health));

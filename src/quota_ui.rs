@@ -371,12 +371,15 @@ impl App {
     pub(crate) fn draw_quota_bar(&mut self,c:&Card,cx:f32,layout:&crate::bar_layout::Layout){
         let indices=self.quota_bar_indices();let mut chosen=None;
         for (position,i)in indices.iter().enumerate(){
-            let alpha=layout.pet_clearance(crate::bar_layout::quota_slot(position));
+            let slot=crate::bar_layout::quota_slot(position);
+            // 下班倒计时把岛收进原宽度时，放不下的额度槽会被藏起，这里没有坐标。
+            let Some(slot_x)=layout.x.get(slot).copied().flatten() else {continue};
+            let alpha=layout.pet_clearance(slot);
             let faded=c.faded(alpha);let faded=if alpha<0.8{faded.ghost()}else{faded};let c=&faded;
-            let a=&self.quota.config.accounts[*i];let x=cx+layout.x[crate::bar_layout::quota_slot(position)].unwrap();
+            let a=&self.quota.config.accounts[*i];let x=cx+slot_x;
             let snapshot=self.quota.rows.get(&a.id).and_then(|r|r.as_ref().ok());
             if a.provider.balance(){
-                let wide=true;let extra=if wide{layout.widths[crate::bar_layout::quota_slot(position)]-27.0}else{0.0};let icon_x=x-extra/2.0;
+                let wide=true;let extra=if wide{layout.widths[slot]-27.0}else{0.0};let icon_x=x-extra/2.0;
                 if a.provider!=Provider::DeepSeek{logo(c,a.provider,icon_x,15.0,22.0);}else{deepseek_badge(c,self.settings.skin,icon_x,15.0,24.0);}
                 let loading=self.quota.balance_loading(&a.id);let stale=self.quota.stale.contains_key(&a.id);
                 if stale||(!loading&&snapshot.is_none()){
@@ -397,7 +400,7 @@ impl App {
                 if c.hit(x-(27.0+extra)/2.0,1.0,27.0+extra,28.0,("quota-pin",&a.id)).clicked(){chosen=Some(a.id.clone());}continue;
             }
             // 有具体点数的额度（如 Kiro）在环右侧跟一段剩余点数，与余额类的排布一致。
-            let extra=(layout.widths[crate::bar_layout::quota_slot(position)]-27.0).max(0.0);
+            let extra=(layout.widths[slot]-27.0).max(0.0);
             let x=if extra>0.0{x-extra/2.0}else{x};
             ring(c,a,snapshot,x,15.0,27.0,accent_colors(&self.quota.config,a));
             if extra>0.0{let stale=self.quota.stale.contains_key(&a.id);if let Some(text)=self.quota.tail_text(&a.id){c.text(x+15.5,21.0,&text,theme::size::PILL_CLOCK,W::Bold,if stale{theme::GRAY}else{theme::WHITE},H::Left);}}

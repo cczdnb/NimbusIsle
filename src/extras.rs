@@ -1,6 +1,6 @@
 //! 设置、通知队列与云屿表情。
 use crate::settings_theme::color as settings_color;
-use crate::app::{App, Cmd, Env, Phase, HUD_TRACK_W, HUD_TRACK_X, HUD_W, PAGE_NAMES, SESSION_PAGE};
+use crate::app::{App, Cmd, Env, NotificationSound, Phase, HUD_TRACK_W, HUD_TRACK_X, HUD_W, PAGE_NAMES, SESSION_PAGE};
 use crate::paint::{Card, H};
 use crate::theme::{self, size, W};
 use eframe::egui::{self, Color32, Rect};
@@ -290,8 +290,10 @@ impl App {
         if self.fullscreen_hidden && a.health().is_some(){return;}
         if self.settings.notifications {
             if system && a.source==AlertSource::Internal {
-                self.pending
-                    .push(Cmd::Notify(a.title.clone(), a.body.clone()));
+                let sound = if !self.settings.sound { NotificationSound::Silent }
+                    else if a.health().is_some() { NotificationSound::Health }
+                    else { NotificationSound::System };
+                self.pending.push(Cmd::Notify(a.title.clone(), a.body.clone(), sound));
             }
             let same_event=|old:&Alert| match (&a.meeting,&old.meeting) {
                 (Some((next,_)),Some((previous,_)))=>crate::calendar::dedupe_key(next)==crate::calendar::dedupe_key(previous),
@@ -420,7 +422,7 @@ impl App {
         if self.notice.as_ref().is_some_and(|a|!allowed(a)){self.notice=None;}
         if self.hud_notice.as_ref().is_some_and(|a|!allowed(a)){self.hud_notice=None;}
         if self.fullscreen_hidden {
-            self.pending.retain(|cmd|!matches!(cmd,Cmd::Notify(title,_)if HealthReminder::ALL.into_iter().any(|kind|title==kind.title())));
+            self.pending.retain(|cmd|!matches!(cmd,Cmd::Notify(title,..)if HealthReminder::ALL.into_iter().any(|kind|title==kind.title())));
         }
         if !self.settings.notification_preview {
             for a in self.alerts.iter_mut().chain(self.notice.iter_mut()).chain(self.hud_notice.iter_mut()) {
@@ -1324,8 +1326,8 @@ impl App {
         ui.separator();
         setting_row(ui,"只在工作日","周六日不显示倒计时",&mut self.settings.offwork_weekdays);
         ui.separator();
-        setting_row(ui,"倒计时专属表情","打开后改用班次专属表情。图还没画好，打开时先不播；关掉则先用现在的表情。",&mut self.settings.offwork_own_faces);
-        settings_hint(ui,"每天走到这个钟点。栏已经放满时，倒计时挤在原来的宽度里，先收起 CPU 和内存。");
+        setting_row(ui,"倒计时专属表情","打开后按上下班时段播放专属表情。关掉则用现在的表情。",&mut self.settings.offwork_own_faces);
+        settings_hint(ui,"每天走到这个钟点。倒计时算进自动宽度；只有顶到屏幕边，才会先收起内存和 CPU。");
         let status=self.offwork_status();
         ui.label(egui::RichText::new(status).size(12.0).color(settings_color(&ui.ctx().clone(),Color32::from_gray(170),Color32::from_gray(90))));
     }
@@ -1613,7 +1615,7 @@ impl App {
                                 if settings_segmented(ui,&mut self.settings.dock,&docks,64.0) {self.settings.island_offset=0;}
                             });
                             if self.settings.dock.is_side() {
-                                ui.label(egui::RichText::new("收起时竖向排列时间、电池、播放、专注和 AI 额度；展开面板从屏幕边缘滑出。吉祥物贴在胶囊内侧，岛上歌词只在顶部停靠时显示。").size(11.0).color(ui.visuals().weak_text_color()));
+                                ui.label(egui::RichText::new("收起时竖向排列时间、电池、播放、专注和 AI 额度；展开面板从屏幕边缘滑出。吉祥物和岛上歌词只在顶部停靠时显示。").size(11.0).color(ui.visuals().weak_text_color()));
                             }
                             ui.add_space(4.0);
                             let side=self.settings.dock.is_side();
@@ -1667,15 +1669,6 @@ impl App {
                             let mut pet=self.settings.pet;
                             setting_row(ui,"云屿吉祥物","收起时常驻，播放音乐时一起唱歌",&mut pet);
                             if pet!=self.settings.pet {self.set_pet(pet);}
-                            if self.settings.pet {
-                                settings_control_row_right(ui,"吉祥物位置",|ui|{
-                                    let mut place=self.settings.pet_place;
-                                    if settings_segmented(ui,&mut place,&[(crate::model::PetPlace::Island,"岛上"),(crate::model::PetPlace::Head,"岛头"),(crate::model::PetPlace::Tail,"岛尾"),(crate::model::PetPlace::Auto,"自动")],52.0) {
-                                        self.settings.pet_place=place;
-                                        self.settings.save();
-                                    }
-                                });
-                            }
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");

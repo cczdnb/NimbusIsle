@@ -19,7 +19,7 @@ impl crate::app::App {
         ui.add_space(12.0);
         let indices=self.quota_bar_indices();let count=indices.len();
         let weather_snapshot=self.weather_pill().cloned();
-        let mut layout=preview_layout(&order,count,self.settings.pet && self.settings.pet_place==crate::model::PetPlace::Island);
+        let mut layout=preview_layout(&order,count,self.settings.pet);
         for (position,extra) in self.quota_balance_layout(ui.ctx()){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
         if self.settings.clock_seconds { layout.widen_clock(24.0); }

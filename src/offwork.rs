@@ -1,6 +1,6 @@
 //! 下班倒计时。只按本机设置的上班和下班钟点。
 
-use chrono::{Datelike, NaiveTime, Offset as _, TimeZone};
+use chrono::{Datelike, NaiveTime, Offset as _, TimeZone, Timelike};
 use eframe::egui::Color32;
 
 use crate::model::Settings;
@@ -271,6 +271,13 @@ pub(crate) struct Runtime {
     finale_day: String,
     finale: Finale,
     caption: FinaleCaption,
+    face_day: String,
+    face_id: u8,
+    face_time: f32,
+    face_wait: f32,
+    face_once: u16,
+    face_plays: u32,
+    face_showing: bool,
 }
 
 impl Runtime {
@@ -304,12 +311,48 @@ impl crate::app::App {
             Phase::Ready { .. } => 30.0,
         };
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
-        self.offwork_face();
     }
 
-    fn offwork_face(&mut self) {
-        // 专属表情还没画。开关打开后留在这里，不拿现有的 12 张顶上。
-        if self.settings.offwork_own_faces || !self.pet_visible() || self.media.is_music() || !matches!(self.pet.state, crate::pet::PetState::Awake | crate::pet::PetState::Curious) {
+    pub(crate) fn offwork_sheet_playing(&self) -> bool {
+        self.offwork.face_showing
+    }
+
+    pub(crate) fn offwork_face(&mut self, dt: f32, visible: bool) {
+        if !self.settings.offwork_own_faces {
+            self.pet.expressions.clear_offwork();
+            self.legacy_offwork_face();
+            return;
+        }
+        let show = self.settings.offwork
+            && visible
+            && !self.media.is_music()
+            && matches!(self.pet.state, crate::pet::PetState::Awake | crate::pet::PetState::Curious)
+            && !matches!(self.offwork_phase(), Phase::Hidden);
+        if !show {
+            self.offwork.face_showing = false;
+            if self.media.is_music() || matches!(self.offwork_phase(), Phase::Hidden) || !self.settings.offwork {
+                self.pet.expressions.clear_offwork();
+                self.offwork.face_id = 0;
+            }
+            return;
+        }
+        let now = chrono::Local::now();
+        let minute = now.hour() * 60 + now.minute();
+        let cue = face_cue(minute, self.settings.offwork_start, self.settings.offwork_end, self.settings.lunch_start, self.settings.lunch_end);
+        let day = now.format("%Y-%m-%d").to_string();
+        let shown = step_face(&mut self.offwork, cue, dt, &day);
+        self.offwork.face_showing = shown.is_some();
+        if let Some((id, time)) = shown {
+            self.pet.expressions.suppress_clip();
+            self.pet.expressions.show_offwork(id, time);
+        } else {
+            self.pet.expressions.clear_offwork();
+        }
+    }
+
+    fn legacy_offwork_face(&mut self) {
+        // 专属表情开关关掉时，沿用现在的 12 张。
+        if self.settings.offwork_own_faces || !self.pet_enabled() || self.media.is_music() || !matches!(self.pet.state, crate::pet::PetState::Awake | crate::pet::PetState::Curious) {
             return;
         }
         let now = chrono::Local::now();
@@ -497,6 +540,170 @@ fn step_finale(mut state: Finale, stored_day: &str, day: &str, shown: &Phase, no
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FaceCue {
+    Quiet,
+    Lunch,
+    Once(u8),
+    Repeat { id: u8, min_gap: f32, max_gap: f32 },
+    Loop(u8),
+}
+
+fn repeat_cue(id: u8) -> FaceCue {
+    let (min_gap, max_gap) = match id {
+        2 | 9 | 10 | 11 => (3.0, 5.0),
+        4 | 6 | 7 => (4.0, 6.0),
+        _ => (6.0, 8.0),
+    };
+    FaceCue::Repeat { id, min_gap, max_gap }
+}
+
+fn face_gap(min_gap: f32, max_gap: f32, id: u8, plays: u32) -> f32 {
+    let t = crate::anim::hash01(((id as u64) << 32) | plays as u64);
+    min_gap + (max_gap - min_gap) * t
+}
+
+/// 专属表情落在哪一段。时间按上班、午休、下班的钟点算，不写死 9:30。
+fn face_cue(now: u32, start: u32, end: u32, lunch_a: u32, lunch_b: u32) -> FaceCue {
+    let now = now.min(1439);
+    let start = start.min(1439);
+    let end = end.min(1439);
+    if start >= end {
+        return FaceCue::Quiet;
+    }
+    if now < start {
+        return FaceCue::Quiet;
+    }
+    if now >= end {
+        return if now - end < 2 { FaceCue::Once(12) } else { FaceCue::Loop(13) };
+    }
+    let lunch_ok = lunch_a < lunch_b && lunch_a > start && lunch_b < end;
+    if lunch_ok && now >= lunch_a && now < lunch_b {
+        return FaceCue::Lunch;
+    }
+    let morning_end = if lunch_ok { lunch_a } else { end.saturating_sub(180).max(start) };
+    if now < morning_end {
+        return morning_cue(now, start, morning_end, lunch_ok);
+    }
+    afternoon_cue(now, if lunch_ok { lunch_b } else { morning_end }, end)
+}
+
+fn morning_cue(now: u32, start: u32, morning_end: u32, hope: bool) -> FaceCue {
+    let len = morning_end.saturating_sub(start);
+    let arrive = len.min(15);
+    let rest = len - arrive;
+    let perk = rest.min(30);
+    let rest = rest - perk;
+    let hope_len = if hope { rest.min(30) } else { 0 };
+    let work = rest - hope_len;
+    let arrive_end = start + arrive;
+    let perk_end = arrive_end + perk;
+    let work_end = perk_end + work;
+    if now < arrive_end {
+        FaceCue::Once(1)
+    } else if now < perk_end {
+        repeat_cue(2)
+    } else if now < work_end {
+        repeat_cue(3)
+    } else if hope {
+        repeat_cue(4)
+    } else {
+        FaceCue::Quiet
+    }
+}
+
+fn afternoon_cue(now: u32, from: u32, end: u32) -> FaceCue {
+    let yawn0 = end.saturating_sub(180);
+    let yawn1 = end.saturating_sub(160);
+    let stretch1 = end.saturating_sub(140);
+    let clock0 = end.saturating_sub(60);
+    let fidget0 = end.saturating_sub(40);
+    let smirk0 = end.saturating_sub(20);
+    let window = |a: u32, b: u32, cue: FaceCue| -> Option<FaceCue> {
+        let a = a.max(from);
+        let b = b.min(end);
+        if a < b && now >= a && now < b { Some(cue) } else { None }
+    };
+    window(smirk0, end, repeat_cue(11))
+        .or_else(|| window(fidget0, smirk0, repeat_cue(10)))
+        .or_else(|| window(clock0, fidget0, repeat_cue(9)))
+        .or_else(|| window(stretch1, clock0, repeat_cue(8)))
+        .or_else(|| window(yawn1, stretch1, repeat_cue(7)))
+        .or_else(|| window(yawn0, yawn1, repeat_cue(6)))
+        .or_else(|| window(from, yawn0, repeat_cue(5)))
+        .unwrap_or(FaceCue::Quiet)
+}
+
+fn step_face(play: &mut Runtime, cue: FaceCue, dt: f32, day: &str) -> Option<(u8, f32)> {
+    if play.face_day != day {
+        play.face_day = day.to_string();
+        play.face_id = 0;
+        play.face_time = 0.0;
+        play.face_wait = 0.0;
+        play.face_once = 0;
+        play.face_plays = 0;
+    }
+    let clip = crate::pet_expressions::offwork_clip_duration();
+    match cue {
+        FaceCue::Quiet | FaceCue::Lunch => {
+            play.face_id = 0;
+            play.face_time = 0.0;
+            play.face_wait = 0.0;
+            None
+        }
+        FaceCue::Once(id) => {
+            if play.face_once & (1 << id) != 0 {
+                play.face_id = 0;
+                return None;
+            }
+            if play.face_id != id {
+                play.face_id = id;
+                play.face_time = 0.0;
+            }
+            play.face_time += dt;
+            if play.face_time >= clip {
+                play.face_once |= 1 << id;
+                play.face_id = 0;
+                play.face_time = 0.0;
+                None
+            } else {
+                Some((id, play.face_time))
+            }
+        }
+        FaceCue::Repeat { id, min_gap, max_gap } => {
+            if play.face_id != id {
+                play.face_id = id;
+                play.face_time = 0.0;
+                play.face_wait = 0.0;
+            }
+            if play.face_wait > 0.0 {
+                play.face_wait = (play.face_wait - dt).max(0.0);
+                return None;
+            }
+            play.face_time += dt;
+            if play.face_time >= clip {
+                play.face_plays += 1;
+                play.face_time = 0.0;
+                play.face_wait = face_gap(min_gap, max_gap, id, play.face_plays);
+                None
+            } else {
+                Some((id, play.face_time))
+            }
+        }
+        FaceCue::Loop(id) => {
+            if play.face_id != id {
+                play.face_id = id;
+                play.face_time = 0.0;
+            }
+            play.face_time += dt;
+            if play.face_time >= clip {
+                play.face_time %= clip;
+            }
+            Some((id, play.face_time))
+        }
+    }
+}
+
 fn split_hms(text: &str) -> (&str, &str) {
     match text.rsplit_once(':') {
         Some((head, secs)) if head.contains(':') => (head, secs),
@@ -600,6 +807,50 @@ mod tests {
         assert_eq!(ending.len(), 10);
         assert_eq!(ending[9].band, Band::Red);
         assert!((ending[9].fill - 10.0 / 30.0).abs() < 0.001, "末尾半小时按自己的长度填充");
+    }
+
+    fn hm(hour: u32, minute: u32) -> u32 { hour * 60 + minute }
+
+    fn sample_shift(now: u32) -> FaceCue {
+        face_cue(now, hm(9, 30), hm(18, 30), hm(12, 0), hm(13, 30))
+    }
+
+    #[test]
+    fn offwork_sheets_follow_the_shift_in_file_order() {
+        assert!(matches!(sample_shift(hm(9, 0)), FaceCue::Quiet));
+        assert!(matches!(sample_shift(hm(9, 30)), FaceCue::Once(1)));
+        assert!(matches!(sample_shift(hm(9, 45)), FaceCue::Repeat { id: 2, .. }));
+        assert!(matches!(sample_shift(hm(10, 15)), FaceCue::Repeat { id: 3, .. }));
+        assert!(matches!(sample_shift(hm(11, 30)), FaceCue::Repeat { id: 4, .. }));
+        assert!(matches!(sample_shift(hm(12, 30)), FaceCue::Lunch));
+        assert!(matches!(sample_shift(hm(13, 30)), FaceCue::Repeat { id: 5, .. }));
+        assert!(matches!(sample_shift(hm(15, 30)), FaceCue::Repeat { id: 6, .. }));
+        assert!(matches!(sample_shift(hm(15, 50)), FaceCue::Repeat { id: 7, .. }));
+        assert!(matches!(sample_shift(hm(16, 10)), FaceCue::Repeat { id: 8, .. }));
+        assert!(matches!(sample_shift(hm(17, 30)), FaceCue::Repeat { id: 9, .. }));
+        assert!(matches!(sample_shift(hm(17, 50)), FaceCue::Repeat { id: 10, .. }));
+        assert!(matches!(sample_shift(hm(18, 10)), FaceCue::Repeat { id: 11, .. }));
+        assert!(matches!(sample_shift(hm(18, 30)), FaceCue::Once(12)));
+        assert!(matches!(sample_shift(hm(18, 32)), FaceCue::Loop(13)));
+    }
+
+    #[test]
+    fn arrival_plays_once_and_overtime_loops() {
+        let mut play = Runtime::default();
+        let clip = crate::pet_expressions::offwork_clip_duration();
+        let shown = step_face(&mut play, FaceCue::Once(1), 0.1, "2026-11-23");
+        assert_eq!(shown.unwrap().0, 1);
+        let done = step_face(&mut play, FaceCue::Once(1), clip, "2026-11-23");
+        assert!(done.is_none());
+        let again = step_face(&mut play, FaceCue::Once(1), 0.1, "2026-11-23");
+        assert!(again.is_none(), "到岗当天只播一次");
+
+        let mut overtime = Runtime::default();
+        let first = step_face(&mut overtime, FaceCue::Loop(13), clip - 0.05, "2026-11-23").unwrap();
+        assert_eq!(first.0, 13);
+        let wrapped = step_face(&mut overtime, FaceCue::Loop(13), 0.1, "2026-11-23").unwrap();
+        assert_eq!(wrapped.0, 13);
+        assert!(wrapped.1 < 0.2, "加班播完立刻从头再播");
     }
 
     #[test]

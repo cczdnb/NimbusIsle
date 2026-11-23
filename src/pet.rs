@@ -87,7 +87,8 @@ mod tests {
         assert_eq!(crate::pet_expressions::sing_frame(0.0),if animations{0}else{7});
         if animations {
             assert_eq!(crate::pet_expressions::sing_frame(0.15),1);
-            assert_eq!(crate::pet_expressions::sing_frame(1.5),0);
+            assert_eq!(crate::pet_expressions::sing_frame(1.5),15);
+            assert_eq!(crate::pet_expressions::sing_frame(1.6),0);
         }
         let mut pet=Pet::default();
         pet.step(PetState::Music,1.0,0.2,[0.0;2],true);
@@ -290,11 +291,13 @@ impl Pet {
     }
 
     pub fn draw(&mut self, c: &Card, cx: f32, t: f64, palette:Option<crate::skin_paint::Palette>) {
-        if self.expressions.draw(c,cx,palette) {return;}
         if self.state==PetState::Music {
+            if self.expressions.draw(c,cx,palette) {return;}
             self.expressions.draw_sing(c,cx,self.music_age);
             return;
         }
+        if self.expressions.draw_offwork(c,cx) {return;}
+        if self.expressions.draw(c,cx,palette) {return;}
         self.expressions.draw_rest(c,cx);
         match self.state {
             PetState::Dozing | PetState::Sleeping => {

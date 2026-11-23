@@ -34,7 +34,7 @@ struct Shell {
     placement_at: PollClock,
     placement_scale: f32,
     /// 上次定位时的目标屏幕、水平位置与 OLED 像素偏移；变化后立即重新定位，不等下一次轮询。
-    placement_key: (String, i32, yunyu::model::Dock, bool, (i32, i32), i32),
+    placement_key: (String, i32, yunyu::model::Dock, bool, (i32, i32)),
     /// OLED 像素偏移当前实际使用的位移；展开、拖拽、隐藏时保持不变。
     #[cfg(windows)]
     oled_shift: (i32, i32),
@@ -194,7 +194,7 @@ impl Shell {
             placed: false,
             placement_at: PollClock::default(),
             placement_scale: 0.0,
-            placement_key: (String::new(), 0, yunyu::model::Dock::Top, true, (0, 0), 0),
+            placement_key: (String::new(), 0, yunyu::model::Dock::Top, true, (0, 0)),
             #[cfg(windows)]
             oled_shift: (0, 0),
             win_x: 0.0,
@@ -288,6 +288,8 @@ impl Shell {
         #[cfg(windows)]
         let origin=self.native.as_ref().and_then(|w|w.logical_origin(ppp)).unwrap_or(origin);
         let cursor = cursor_logical(ppp).map(|(x, y)| Pos2::new(x - origin.x, y - origin.y));
+        #[cfg(windows)]
+        let cursor=cursor.filter(|_|!self.native.as_ref().is_some_and(|w|w.holding_through_strip()));
         // 所在屏幕换算到窗口逻辑坐标，供通知详情等浮层避开屏幕边缘。
         #[cfg(windows)]
         let screen=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|{
@@ -386,7 +388,7 @@ impl eframe::App for Shell {
         #[cfg(windows)]
         self.poll_tray();
         #[cfg(windows)]
-        let foreground_changed=yunyu::native::take_foreground_change();
+        let foreground_changed=self.native.as_mut().is_some_and(|window|window.take_foreground_change());
         #[cfg(windows)]
         if foreground_changed {
             // 切到别的程序：收起，并在光标离开前不再自动展开
@@ -398,14 +400,12 @@ impl eframe::App for Shell {
         let shift=self.oled_shift;
         // 拖动时位置不取整，按万分之一比例比较，窗口逐帧平滑跟随。
         #[cfg(windows)]
-        let gutter=(self.app.pet_gutter()*100.0).round() as i32;
-        #[cfg(windows)]
-        let placement_key=(self.app.settings.display_id.clone(),(offset*10000.0).round() as i32,self.app.settings.dock,self.app.settings.avoids_top_bar(),shift,gutter);
+        let placement_key=(self.app.settings.display_id.clone(),(offset*10000.0).round() as i32,self.app.settings.dock,self.app.settings.avoids_top_bar(),shift);
         #[cfg(windows)]
         if !self.placed || self.placement_scale!=ctx.pixels_per_point() || self.placement_key!=placement_key || self.placement_at.ready(Duration::from_secs(1)) {
             // 只有位置变化时沿用已知屏幕，避免拖动中每帧枚举显示器。
             let offset_only=self.placed && self.placement_scale==ctx.pixels_per_point() && !self.placement_at.ready(Duration::from_secs(1))
-                && (&self.placement_key.0,self.placement_key.2,self.placement_key.3,self.placement_key.4,self.placement_key.5)==(&placement_key.0,placement_key.2,placement_key.3,placement_key.4,placement_key.5);
+                && (&self.placement_key.0,self.placement_key.2,self.placement_key.3,self.placement_key.4)==(&placement_key.0,placement_key.2,placement_key.3,placement_key.4);
             if !offset_only {
                 self.placement_at=PollClock::now();
                 self.app.displays=yunyu::display_layout::connected();
@@ -413,7 +413,7 @@ impl eframe::App for Shell {
             self.placement_scale=ctx.pixels_per_point();
             self.placement_key=placement_key;
             let display=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
-            if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(self.placement_scale,yunyu::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),offset,self.app.settings.dock,shift,self.app.pet_gutter()))) {
+            if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(self.placement_scale,yunyu::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),offset,self.app.settings.dock,shift))) {
                 if !self.placed {diagnostics::startup("目标屏幕物理坐标定位完成，已请求显示");}
                 self.placed=true;
                 if !yunyu::hotkeys::hidden() { ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true)); }
@@ -594,14 +594,15 @@ impl eframe::App for Shell {
             }
             while let Some(ev)=self.quota.try_recv(self.app.quota_config()){self.app.quota_event(ev);}
         }
+        #[cfg(windows)]
+        if self.native.as_ref().is_some_and(|w|w.page_scroll_cancelled()) {self.app.cancel_page_scroll();}
         let mut out = None;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 // 左右停靠时画布是竖向的 SIDE_W × SIDE_H。
-                let gutter=if self.app.settings.dock.is_side(){0.0}else{self.app.pet_gutter()};
                 let size=if self.app.settings.dock.is_side() {egui::vec2(yunyu::side_dock::SIDE_W,yunyu::side_dock::SIDE_H)} else {egui::vec2(app::WIN_W,app::WIN_H)};
-                let win = egui::Rect::from_min_size(ui.max_rect().min+egui::vec2(gutter,0.0),size);
+                let win = egui::Rect::from_min_size(ui.max_rect().min,size);
                 out = Some(self.app.frame(ui, win, &env));
             });
         let Some(out) = out else { return };
@@ -619,7 +620,7 @@ impl eframe::App for Shell {
             if shift!=self.oled_shift {
                 self.oled_shift=shift;
                 let display=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
-                if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(ctx.pixels_per_point(),yunyu::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),self.app.placement_offset(),self.app.settings.dock,shift,self.app.pet_gutter()))) {
+                if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(ctx.pixels_per_point(),yunyu::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),self.app.placement_offset(),self.app.settings.dock,shift))) {
                     self.placement_key.4=shift;
                 }
                 ctx.request_repaint();
@@ -636,11 +637,12 @@ impl eframe::App for Shell {
                     i.events.iter().any(|e|!matches!(e,egui::Event::Screenshot{..})),
                 ));
                 let changed=shot.as_ref().is_some_and(|image|native.present_frame(image.size,image.as_raw()));
-                if shot.is_none() || changed || other_input {
-                    // 拖动、悬停等有输入时满帧跟手；歌词滚动这类自己在动的画面约 30 帧/秒读回，
-                    // 未到间隔就预约一次重绘，到时补上读回，动画停下时的最后一帧不会漏掉。
+                let turning=out.page_transition && !self.hidden;
+                let interactive=other_input || turning;
+                if shot.is_none() || changed || interactive {
+                    // 翻页期间即使滚轮已经停下，也要交付当前帧；持续动效仍按自身的低频节奏读回。
                     let now=Instant::now();
-                    match yunyu::layered::readback_delay(self.readback_at,now,other_input) {
+                    match yunyu::layered::readback_delay(self.readback_at,now,interactive,out.repaint_after) {
                         None=>{self.readback_at=Some(now);ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));}
                         Some(wait)=>ctx.request_repaint_after(wait),
                     }
@@ -649,8 +651,9 @@ impl eframe::App for Shell {
             let r = |r: egui::Rect| (r.left(), r.top(), r.width(), r.height());
             // 保留主窗口的事件循环，避免全屏隐藏后设置窗口无法关闭或重新打开。
             let region=if self.hidden {(0.0,0.0,0.0,0.0)} else {r(out.region)};
-            let hit=if self.hidden {(0.0,0.0,0.0,0.0)} else {r(out.hit)};
-            native.update(region, hit, if self.hidden{None}else{out.notice_hit.map(r)},if self.hidden{None}else{out.pet_hit.map(r)},if self.hidden{None}else{out.file_drop_zone.map(r)},if self.hidden{None}else{out.glass.as_deref()},ctx.pixels_per_point(), out.editing, !self.hidden && out.expanded);
+            let hit=if self.hidden || out.click_through && out.notice_hit.is_none() {(0.0,0.0,0.0,0.0)} else {r(out.hit)};
+            native.set_page_scroll_area(out.page_scroll_area.filter(|_|!self.hidden && out.expanded),ctx.pixels_per_point());
+            native.update(region, hit, if self.hidden{None}else{out.notice_hit.map(r)},if self.hidden{None}else{out.file_drop_zone.map(r)},if self.hidden{None}else{out.glass.as_deref()},ctx.pixels_per_point(), out.editing, !self.hidden && out.expanded);
             if !self.hidden && self.app.settings.avoids_top_bar() && self.app.settings.top_bar_on_top && !self.app.settings.dock.is_side() {
                 if let Some(display)=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id) {
                     native.keep_above_top_bar(display.bounds);
@@ -790,8 +793,11 @@ impl eframe::App for Shell {
                     self.volume_quiet=PollClock::now();
                 },
                 Cmd::Copy(text)=>{ctx.copy_text(text);self.app.say("已复制");},
-                Cmd::Notify(title,body)=>{
-                    #[cfg(windows)] if let Some(tray)=&self.tray{tray.notify(&title,&body,self.app.settings.sound);}
+                Cmd::Notify(title,body,sound)=>{
+                    #[cfg(windows)] {
+                        if sound==app::NotificationSound::Health {yunyu::tray::play_health_sound();}
+                        if let Some(tray)=&self.tray {tray.notify(&title,&body,sound==app::NotificationSound::System);}
+                    }
                 },
                 cmd @ (Cmd::RequestNotifications|Cmd::RequestQqNotifications)=>{
                     #[cfg(windows)] {self.app.settings.qq_only=matches!(cmd,Cmd::RequestQqNotifications);self.app.settings.read_notifications=true;self.app.settings.save();self.incoming=None;match yunyu::system::connect_with_settings(ctx.clone(),&self.app.settings){Ok(rx)=>{self.incoming=Some(rx);self.app.listener_status="正在请求 Windows 通知权限…".into();},Err(e)=>self.app.listener_status=format!("Windows 未允许读取通知：{}。需要相应的系统权限或应用身份。",e.code())}}
@@ -826,7 +832,10 @@ impl eframe::App for Shell {
         #[cfg(not(windows))] let autostart = false;
         self.app.settings_ui(ctx, autostart);
         self.app.mail_reader_ui(ctx);
-        #[cfg(windows)] let repaint_after=if self.hidden{Duration::from_secs(1)}else{out.repaint_after};
+        // 翻页以帧起点为准，扣掉本帧已花的时间；入口处的限帧仍然生效。
+        #[cfg(windows)] let repaint_after=if self.hidden {Duration::from_secs(1)}
+            else if out.page_transition {out.repaint_after.saturating_sub(self.frame_at.elapsed())}
+            else {out.repaint_after};
         #[cfg(not(windows))] let repaint_after=out.repaint_after;
         schedule_repaint(ctx,repaint_after);
         // 只记慢帧：卡顿反馈时能直接看出是渲染慢还是输入被吞（页面/展开状态一并记下）。

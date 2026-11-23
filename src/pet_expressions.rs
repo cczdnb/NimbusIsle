@@ -1,5 +1,5 @@
 //! 云屿表情：按场景播放，隐藏时暂停，日常动作之间留出安静时间。
-//! 每个表情单独一张 144×1350 的序列图（15 帧 × 3 倍密度），只解码、上传正在播放的那一张，播完即释放。
+//! 每个表情单独一张 15 帧的竖图。尺寸可以不同，播放时按这一张自己的格子往下切，只解码正在播放的那一张，播完即释放。
 use crate::pet::PetState;
 use crate::paint::Card;
 use crate::skin_paint::Palette;
@@ -19,7 +19,7 @@ impl Expression {
         else {[0.35,0.12,0.12,0.12,0.13,0.13,0.14,0.40,0.18,0.14,0.12,0.12,0.12,0.14,0.14]}
     }
     pub fn duration(self)->f32 {self.times().iter().sum()}
-    /// 由 `assets/pet/expressions.png` 按列拆出，顺序与 `ALL` 一致。
+    /// 每张表情一张竖图，顺序与 `ALL` 一致。
     fn sheet(self)->&'static [u8] {
         const SHEETS:[&[u8];12]=[
             include_bytes!("../assets/pet/expressions/00-wink.png"),include_bytes!("../assets/pet/expressions/01-smug.png"),
@@ -44,31 +44,157 @@ pub(crate) struct Expressions {
     cooldown:f32,
     hovered:bool,
     next:[usize;4],
-    /// 正在播放的表情序列图；换表情或换皮肤时原地替换内容，播完释放。
-    sheet:Option<(Expression,Option<Palette>,TextureHandle)>,
+    /// 正在播放的表情。整张竖图留在内存里，显卡上只放当前这一格。
+    sheet:Option<LoadedExpression>,
     /// 没有表情在播时，常驻显示的那张设计稿。
     rest:Option<TextureHandle>,
-    /// 听歌时循环的 15 帧唱歌图，和 12 个表情分开加载。
-    sing:Option<TextureHandle>,
+    /// 听歌时循环的 16 帧唱歌图，和 12 个表情分开加载。
+    sing:Option<LoadedSing>,
+    /// 下班倒计时专属序列。编号 1–13，对应 `assets/pet/offwork/{n}.png`。
+    offwork_id:u8,
+    offwork_time:f32,
+    offwork_sheet:Option<LoadedOffwork>,
+}
+
+struct LoadedExpression {
+    expression:Expression,
+    palette:Option<Palette>,
+    image:image::RgbaImage,
+    edges:[f32;16],
+    texture:TextureHandle,
+    frame:usize,
+}
+struct LoadedSing { image:image::RgbaImage, texture:TextureHandle, frame:usize }
+struct LoadedOffwork { id:u8, image:image::RgbaImage, texture:TextureHandle, frame:usize }
+
+fn color_image(image:&image::RgbaImage)->egui::ColorImage {
+    egui::ColorImage::from_rgba_unmultiplied([image.width() as usize,image.height() as usize],image.as_raw())
+}
+fn crop_rows(image:&image::RgbaImage,y0:u32,y1:u32)->image::RgbaImage {
+    let y0=y0.min(image.height().saturating_sub(1));
+    let y1=y1.max(y0+1).min(image.height());
+    image::imageops::crop_imm(image,0,y0,image.width(),y1-y0).to_image()
+}
+fn band_rows(height:u32,start:f32,end:f32)->(u32,u32) {
+    let scale=height as f32;
+    ((start*scale).round() as u32,(end*scale).round() as u32)
 }
 
 pub const SING_FRAME_SECS:f32=0.1;
+pub const SING_FRAMES:usize=16;
+
+const OFFWORK_FRAMES:[f32;15]=[0.35,0.12,0.12,0.12,0.13,0.13,0.14,0.40,0.18,0.14,0.12,0.12,0.12,0.14,0.14];
+
+pub(crate) fn offwork_clip_duration()->f32 {OFFWORK_FRAMES.iter().sum()}
+
+fn offwork_frame(time:f32)->usize {
+    let mut end=0.0;
+    for (index,seconds) in OFFWORK_FRAMES.into_iter().enumerate() {end+=seconds;if time<end{return index;}}
+    14
+}
+
+fn offwork_sheet(id:u8)->&'static [u8] {
+    match id {
+        1=>include_bytes!("../assets/pet/offwork/1.png"),
+        2=>include_bytes!("../assets/pet/offwork/2.png"),
+        3=>include_bytes!("../assets/pet/offwork/3.png"),
+        4=>include_bytes!("../assets/pet/offwork/4.png"),
+        5=>include_bytes!("../assets/pet/offwork/5.png"),
+        6=>include_bytes!("../assets/pet/offwork/6.png"),
+        7=>include_bytes!("../assets/pet/offwork/7.png"),
+        8=>include_bytes!("../assets/pet/offwork/8.png"),
+        9=>include_bytes!("../assets/pet/offwork/9.png"),
+        10=>include_bytes!("../assets/pet/offwork/10.png"),
+        11=>include_bytes!("../assets/pet/offwork/11.png"),
+        12=>include_bytes!("../assets/pet/offwork/12.png"),
+        _=>include_bytes!("../assets/pet/offwork/13.png"),
+    }
+}
+
+/// 一张表情竖图的 16 条切线（15 格）。能整除时按高度均分；探头这种格子上方留了空的，改用刚好包住每一帧的等距格子。
+fn expression_frame_edges(image:&image::RgbaImage)->[f32;16] {
+    let height=image.height() as f32;
+    let equal=|index:usize| index as f32/15.0;
+    let faces=ink_faces(image);
+    if faces.len()!=15 {return std::array::from_fn(equal);}
+    let fits_equal=faces.iter().enumerate().all(|(index,&(top,bottom))|{
+        let start=equal(index)*height;
+        let end=equal(index+1)*height;
+        top as f32+1.0>=start && bottom as f32<=end+1.0
+    });
+    if fits_equal {return std::array::from_fn(equal);}
+    let Some((origin,pitch))=fitted_cell(image.height(),&faces) else {return std::array::from_fn(equal);};
+    std::array::from_fn(|index| ((origin+index as u32*pitch) as f32/height).min(1.0))
+}
+
+fn ink_faces(image:&image::RgbaImage)->Vec<(u32,u32)> {
+    let (width,height)=(image.width(),image.height());
+    let mut spans:Vec<(u32,u32)>=Vec::new();
+    let mut start=None;
+    for y in 0..height {
+        let mut ink=false;
+        let mut x=0;
+        while x<width {
+            if image.get_pixel(x,y).0[3]>=8 {ink=true;break;}
+            x+=2;
+        }
+        if ink {if start.is_none(){start=Some(y);}}
+        else if let Some(from)=start {spans.push((from,y-1));start=None;}
+    }
+    if let Some(from)=start {spans.push((from,height-1));}
+    let mut merged:Vec<(u32,u32)>=Vec::new();
+    for (top,bottom) in spans {
+        if let Some(previous)=merged.last_mut() {
+            if top-previous.1-1<=6 {*previous=(previous.0,bottom);continue;}
+        }
+        merged.push((top,bottom));
+    }
+    merged.retain(|&(top,bottom)| bottom+1-top>6);
+    merged
+}
+
+fn fitted_cell(height:u32,faces:&[(u32,u32)])->Option<(u32,u32)> {
+    let mut best:Option<(u32,u32,u32)>=None;
+    let max_pitch=height/15+40;
+    let min_pitch=(height/15).min(160);
+    for pitch in min_pitch..=max_pitch {
+        let span=15*pitch;
+        if span>height {continue;}
+        for origin in 0..=height-span {
+            let mut slack=u32::MAX;
+            let mut ok=true;
+            for (index,&(top,bottom)) in faces.iter().enumerate() {
+                let start=origin+index as u32*pitch;
+                let end=start+pitch;
+                if top<start || bottom+1>end {ok=false;break;}
+                slack=slack.min(top-start).min(end-(bottom+1));
+            }
+            if ok && best.is_none_or(|(best_slack,_,_)| slack>best_slack) {best=Some((slack,origin,pitch));}
+        }
+    }
+    best.map(|(_,origin,pitch)| (origin,pitch))
+}
 
 /// 唱歌序列的帧号。系统关闭动画时停在张嘴的中间帧。
 pub fn sing_frame(age:f32)->usize {
     if !crate::bar_layout::animations_enabled() {7}
-    else {(age.max(0.0)/SING_FRAME_SECS).floor() as usize%15}
+    else {(age.max(0.0)/SING_FRAME_SECS).floor() as usize%SING_FRAMES}
 }
 
 impl Default for Expressions {
-    fn default()->Self {Self{clip:None,wait:8.0,cooldown:0.0,hovered:false,next:[0;4],sheet:None,rest:None,sing:None}}
+    fn default()->Self {Self{clip:None,wait:8.0,cooldown:0.0,hovered:false,next:[0;4],sheet:None,rest:None,sing:None,offwork_id:0,offwork_time:0.0,offwork_sheet:None}}
 }
 
 impl Expressions {
     pub fn current(&self)->Option<Expression> {self.clip.map(|clip|clip.0)}
+    pub fn shown_sing_frame(&self)->Option<usize> {self.sing.as_ref().map(|loaded| loaded.frame)}
     pub fn play(&mut self,expression:Expression) {self.clip=Some((expression,0.0));}
     pub fn play_at(&mut self,expression:Expression,time:f32) {self.clip=Some((expression,time));}
     pub fn clear(&mut self) {self.clip=None;self.wait=8.0;self.cooldown=0.0;self.hovered=false;self.sheet=None;}
+    /// 专属表情占用吉祥物时，清掉正在播的日常序列，避免两套叠在一起。
+    pub fn suppress_clip(&mut self) {self.clip=None;self.sheet=None;self.wait=8.0;}
+    pub fn show_offwork(&mut self,id:u8,time:f32) {self.offwork_id=id;self.offwork_time=time;}
+    pub fn clear_offwork(&mut self) {self.offwork_id=0;self.offwork_time=0.0;}
     fn choose(&mut self,bucket:usize,pool:&[Expression])->Expression {
         let expression=pool[self.next[bucket]%pool.len()];self.next[bucket]=self.next[bucket].wrapping_add(1);expression
     }
@@ -104,26 +230,61 @@ impl Expressions {
     }
     pub fn draw(&mut self,c:&Card,cx:f32,palette:Option<Palette>)->bool {
         let Some((expression,time))=self.clip else{return false;};
-        if self.sheet.as_ref().is_none_or(|(previous,_,_)| *previous!=expression) {
-            let decoded=image::load_from_memory(expression.sheet()).expect("内置表情序列图").into_rgba8();
-            let image=egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize,decoded.height() as usize],decoded.as_raw());
-            drop(decoded);
-            if let Some((previous,previous_palette,texture))=&mut self.sheet {*previous=expression;*previous_palette=palette;texture.set(image,egui::TextureOptions::LINEAR);}
-            else {
-                let texture=c.ui.ctx().load_texture("yunyu-expressions",image,egui::TextureOptions::LINEAR);
-                crate::skin_paint::mark_colored(texture.id());self.sheet=Some((expression,palette,texture));
-            }
-        }
         let frame=if crate::bar_layout::animations_enabled(){expression.frame(time)}else{7};
-        let uv=Rect::from_min_max(egui::pos2(0.0,frame as f32/15.0),egui::pos2(1.0,(frame+1) as f32/15.0));
-        c.painter.image(self.sheet.as_ref().unwrap().2.id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
+        if self.sheet.as_ref().is_none_or(|loaded| loaded.expression!=expression) {
+            let decoded=image::load_from_memory(expression.sheet()).expect("内置表情序列图").into_rgba8();
+            let edges=expression_frame_edges(&decoded);
+            let (y0,y1)=band_rows(decoded.height(),edges[frame],edges[frame+1]);
+            let image=color_image(&crop_rows(&decoded,y0,y1));
+            if let Some(loaded)=&mut self.sheet {
+                loaded.expression=expression;loaded.palette=palette;loaded.image=decoded;loaded.edges=edges;loaded.frame=frame;
+                loaded.texture.set(image,egui::TextureOptions::LINEAR);
+            } else {
+                let texture=c.ui.ctx().load_texture("yunyu-expressions",image,egui::TextureOptions::LINEAR);
+                crate::skin_paint::mark_colored(texture.id());
+                self.sheet=Some(LoadedExpression{expression,palette,image:decoded,edges,texture,frame});
+            }
+        } else if self.sheet.as_ref().unwrap().frame!=frame {
+            let loaded=self.sheet.as_mut().unwrap();
+            let (y0,y1)=band_rows(loaded.image.height(),loaded.edges[frame],loaded.edges[frame+1]);
+            loaded.texture.set(color_image(&crop_rows(&loaded.image,y0,y1)),egui::TextureOptions::LINEAR);
+            loaded.frame=frame;loaded.palette=palette;
+        }
+        let uv=Rect::from_min_max(egui::pos2(0.0,0.0),egui::pos2(1.0,1.0));
+        c.painter.image(self.sheet.as_ref().unwrap().texture.id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
+        true
+    }
+    /// 下班专属表情。15 帧竖图，画进和日常表情一样的 48×30 槽。
+    pub fn draw_offwork(&mut self,c:&Card,cx:f32)->bool {
+        let id=self.offwork_id;
+        if !(1..=13).contains(&id) {return false;}
+        let frame=if crate::bar_layout::animations_enabled(){offwork_frame(self.offwork_time)}else{7};
+        if self.offwork_sheet.as_ref().is_none_or(|loaded| loaded.id!=id) {
+            let decoded=image::load_from_memory(offwork_sheet(id)).expect("下班专属表情").into_rgba8();
+            let (y0,y1)=band_rows(decoded.height(),frame as f32/15.0,(frame+1) as f32/15.0);
+            let image=color_image(&crop_rows(&decoded,y0,y1));
+            if let Some(loaded)=&mut self.offwork_sheet {loaded.id=id;loaded.image=decoded;loaded.frame=frame;loaded.texture.set(image,egui::TextureOptions::LINEAR);}
+            else {
+                let texture=c.ui.ctx().load_texture(format!("yunyu-offwork-{id}"),image,egui::TextureOptions::LINEAR);
+                crate::skin_paint::mark_colored(texture.id());
+                self.offwork_sheet=Some(LoadedOffwork{id,image:decoded,texture,frame});
+            }
+        } else if self.offwork_sheet.as_ref().unwrap().frame!=frame {
+            let loaded=self.offwork_sheet.as_mut().unwrap();
+            let (y0,y1)=band_rows(loaded.image.height(),frame as f32/15.0,(frame+1) as f32/15.0);
+            loaded.texture.set(color_image(&crop_rows(&loaded.image,y0,y1)),egui::TextureOptions::LINEAR);
+            loaded.frame=frame;
+        }
+        let uv=Rect::from_min_max(egui::pos2(0.0,0.0),egui::pos2(1.0,1.0));
+        c.painter.image(self.offwork_sheet.as_ref().unwrap().texture.id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
         true
     }
     /// 待机、专注、睡觉这些没有序列在播的时候，显示设计稿里睁眼的那一帧。
     pub fn draw_rest(&mut self,c:&Card,cx:f32) {
         if self.rest.is_none() {
             let decoded=image::load_from_memory(Expression::Wink.sheet()).expect("内置吉祥物").into_rgba8();
-            let frame=image::imageops::crop_imm(&decoded,0,0,144,90).to_image();
+            let cell=(decoded.height()/15).max(1);
+            let frame=image::imageops::crop_imm(&decoded,0,0,decoded.width(),cell).to_image();
             let image=egui::ColorImage::from_rgba_unmultiplied([frame.width() as usize,frame.height() as usize],frame.as_raw());
             let texture=c.ui.ctx().load_texture("yunyu-mascot",image,egui::TextureOptions::LINEAR);
             crate::skin_paint::mark_colored(texture.id());
@@ -133,16 +294,22 @@ impl Expressions {
     }
     /// 听歌且没有插入表情时，循环播放唱歌序列。
     pub fn draw_sing(&mut self,c:&Card,cx:f32,age:f32) {
+        let frame=sing_frame(age);
+        let step=1.0/SING_FRAMES as f32;
         if self.sing.is_none() {
             let decoded=image::load_from_memory(include_bytes!("../assets/pet/expressions/12-sing.png")).expect("唱歌序列图").into_rgba8();
-            let image=egui::ColorImage::from_rgba_unmultiplied([decoded.width() as usize,decoded.height() as usize],decoded.as_raw());
-            let texture=c.ui.ctx().load_texture("yunyu-sing",image,egui::TextureOptions::LINEAR);
+            let (y0,y1)=band_rows(decoded.height(),frame as f32*step,(frame+1) as f32*step);
+            let texture=c.ui.ctx().load_texture("yunyu-sing",color_image(&crop_rows(&decoded,y0,y1)),egui::TextureOptions::LINEAR);
             crate::skin_paint::mark_colored(texture.id());
-            self.sing=Some(texture);
+            self.sing=Some(LoadedSing{image:decoded,texture,frame});
+        } else if self.sing.as_ref().unwrap().frame!=frame {
+            let loaded=self.sing.as_mut().unwrap();
+            let (y0,y1)=band_rows(loaded.image.height(),frame as f32*step,(frame+1) as f32*step);
+            loaded.texture.set(color_image(&crop_rows(&loaded.image,y0,y1)),egui::TextureOptions::LINEAR);
+            loaded.frame=frame;
         }
-        let frame=sing_frame(age);
-        let uv=Rect::from_min_max(egui::pos2(0.0,frame as f32/15.0),egui::pos2(1.0,(frame+1) as f32/15.0));
-        c.painter.image(self.sing.as_ref().unwrap().id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
+        let uv=Rect::from_min_max(egui::pos2(0.0,0.0),egui::pos2(1.0,1.0));
+        c.painter.image(self.sing.as_ref().unwrap().texture.id(),c.rect(cx-24.0,0.0,48.0,30.0),uv,Color32::WHITE);
     }
 }
 
@@ -207,14 +374,25 @@ mod tests {
     fn sheets_keep_alpha_and_the_looking_eyes_really_move(){
         for expression in Expression::ALL {
             let image=image::load_from_memory(expression.sheet()).unwrap().into_rgba8();
-            assert_eq!(image.dimensions(),(144,1350),"每张序列图 15 帧、保持 3 倍密度");assert_eq!(image.get_pixel(0,0).0[3],0);
+            assert_eq!(image.get_pixel(0,0).0[3],0,"{expression:?}");
+            let edges=expression_frame_edges(&image);
+            let height=image.height() as f32;
             let mut centers=Vec::new();
             for frame in 0..15 {
+                let y0=(edges[frame]*height).floor() as u32;
+                let y1=(edges[frame+1]*height).ceil() as u32;
                 let mut xs=Vec::new();
-                for y in 0..90 {for x in 0..144 {if image.get_pixel(x,frame*90+y).0[3]>150 {xs.push(x as f32/3.0);}}}
-                assert!(!xs.is_empty());centers.push(xs.iter().sum::<f32>()/xs.len() as f32);
+                for y in y0..y1.min(image.height()) {
+                    let mut x=0;
+                    while x<image.width() {
+                        if image.get_pixel(x,y).0[3]>150 {xs.push(x as f32);}
+                        x+=2;
+                    }
+                }
+                assert!(!xs.is_empty(),"{expression:?} 第 {frame} 帧是空的");
+                centers.push(xs.iter().sum::<f32>()/xs.len() as f32);
             }
-            if expression as usize>=9 {assert!(centers.iter().copied().fold(f32::NEG_INFINITY,f32::max)-centers.iter().copied().fold(f32::INFINITY,f32::min)>2.0,"张望的表情应真的左右移动");}
+            if expression as usize>=9 {assert!(centers.iter().copied().fold(f32::NEG_INFINITY,f32::max)-centers.iter().copied().fold(f32::INFINITY,f32::min)>6.0,"{expression:?} 应真的左右移动");}
             assert_eq!(expression.frame(0.0),0);assert_eq!(expression.frame(expression.duration()),14);
         }
     }
@@ -226,18 +404,18 @@ mod tests {
                 let card=Card::new(ui,egui::Pos2::ZERO,ui.max_rect());assert!(expressions.draw(&card,24.0,palette));
             });
         });
-        let output=frame(&mut expressions,None);let id=expressions.sheet.as_ref().unwrap().2.id();
+        let output=frame(&mut expressions,None);let id=expressions.sheet.as_ref().unwrap().texture.id();
         let delta=&output.textures_delta.set.iter().find(|(texture,_)|*texture==id).unwrap().1;
         let egui::ImageData::Color(image)=&delta.image else{panic!("表情应为彩色纹理")};
-        assert_eq!(image.size,[144,1350],"只上传正在播放的表情，不上传整张图集");
+        assert_eq!(image.size,[336,213],"只上传眨眼的当前一帧");
         assert!(image.pixels.iter().any(|p|p.a()>200&&p.r()<70&&p.g()<55&&p.b()<45),"表情应带着深色眼睛");
         assert!(!frame(&mut expressions,None).textures_delta.set.iter().any(|(texture,_)|*texture==id),"同一表情、同一皮肤不能重复解码或上传");
         for palette in [crate::skin_paint::CREAM,crate::skin_paint::GLASS_LIGHT] {
-            let output=frame(&mut expressions,Some(palette));assert_eq!(expressions.sheet.as_ref().unwrap().2.id(),id);
+            let output=frame(&mut expressions,Some(palette));assert_eq!(expressions.sheet.as_ref().unwrap().texture.id(),id);
             assert!(!output.textures_delta.set.iter().any(|(texture,_)|*texture==id),"彩色表情按原图显示，不随浅色皮肤反相");
         }
         expressions.play(Expression::Search);
-        let output=frame(&mut expressions,None);assert_eq!(expressions.sheet.as_ref().unwrap().2.id(),id,"换表情原地替换，不新建纹理");
+        let output=frame(&mut expressions,None);assert_eq!(expressions.sheet.as_ref().unwrap().texture.id(),id,"换表情原地替换，不新建纹理");
         assert!(output.textures_delta.set.iter().any(|(texture,_)|*texture==id));
         for _ in 0..100 {expressions.step(PetState::Awake,0.1,true);if expressions.current().is_none(){break;}}
         assert!(expressions.current().is_none() && expressions.sheet.is_none(),"播完释放纹理，不常驻显存");
@@ -245,12 +423,21 @@ mod tests {
     }
 
     #[test]
-    fn split_sheets_match_the_packed_atlas_pixel_for_pixel(){
-        let atlas=image::load_from_memory(include_bytes!("../assets/pet/expressions.png")).unwrap().into_rgba8();
+    fn every_frame_stays_inside_its_cell(){
         for expression in Expression::ALL {
-            let sheet=image::load_from_memory(expression.sheet()).unwrap().into_rgba8();
-            let column=image::imageops::crop_imm(&atlas,expression as u32*144,0,144,1350).to_image();
-            assert!(sheet==column,"{expression:?} 与图集不一致，请重新拆分");
+            let image=image::load_from_memory(expression.sheet()).unwrap().into_rgba8();
+            let faces=ink_faces(&image);
+            let edges=expression_frame_edges(&image);
+            assert_eq!(faces.len(),15,"{expression:?}");
+            let height=image.height() as f32;
+            for (index,(top,bottom)) in faces.iter().enumerate() {
+                let start=edges[index]*height;
+                let end=edges[index+1]*height;
+                assert!(*top as f32+0.5>=start && *bottom as f32<=end+0.5,"{expression:?} 第 {index} 帧越出格子");
+            }
         }
+        let sing=image::load_from_memory(include_bytes!("../assets/pet/expressions/12-sing.png")).unwrap().into_rgba8();
+        assert_eq!(sing.dimensions(),(672,6704));
+        assert_eq!(sing.height()%SING_FRAMES as u32,0);
     }
 }

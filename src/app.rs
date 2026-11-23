@@ -43,6 +43,8 @@ pub const NUDGE_BANNER_SECS: f64 = 10.0;
 pub(crate) const CALENDAR_H: f32 = 216.0;
 pub const BAR_W: f32 = 163.0; // 收起药丸宽
 pub const BAR_H: f32 = 30.0; // 收起药丸高
+/// 矮页续滚带与新岛体重叠的宽度，避免光标在边缘来回时误收起。
+const PAGE_EDGE_OVERLAP: f32 = 8.0;
 /// 播放中在原常驻行下方再加一行媒体条的高度与间距。
 pub const MEDIA_ROW_H: f32 = 30.0;
 pub const MEDIA_ROW_GAP: f32 = 4.0;
@@ -181,6 +183,9 @@ pub(crate) const UNREAD_SLOT: f32 = 36.0;
 /// 收起时两个来源图标的间距。要给角标留出空，不能贴在一起。
 fn unread_step(_horizontal: bool) -> f32 { 34.0 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotificationSound { Silent, System, Health }
+
 /// 交给外壳执行的副作用。
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
@@ -193,7 +198,7 @@ pub enum Cmd {
     Focus,
     Reveal(PathBuf),
     Copy(String),
-    Notify(String, String),
+    Notify(String, String, NotificationSound),
     RequestNotifications,
     RequestQqNotifications,
     DisconnectNotifications,
@@ -440,7 +445,6 @@ pub struct FrameOut {
     pub hit: Rect,
     pub notice_hit: Option<Rect>,
     /// 岛外吉祥物的点击区。只用来挡住穿透，不参与悬停展开。
-    pub pet_hit: Option<Rect>,
     /// 文件拖入感应区；独立于普通鼠标命中区。
     pub file_drop_zone: Option<Rect>,
     /// 展开状态立即生效，不等待展开动画结束。
@@ -448,6 +452,12 @@ pub struct FrameOut {
     pub editing: bool,
     pub animating: bool,
     pub repaint_after: std::time::Duration,
+    /// 切到较矮页面时，原页边缘临时保留的续滚范围，不参与绘制或点击命中。
+    pub page_scroll_area: Option<Rect>,
+    /// 极简细条只感应悬停，鼠标点击交给下面的应用。
+    pub click_through: bool,
+    /// 当前帧正在绘制翻页过渡。
+    pub page_transition: bool,
     pub cmds: Vec<Cmd>,
 }
 
@@ -764,6 +774,8 @@ pub struct App {
     wheel_delta: f32,
     wheel_at: f64,
     wheel_page_at: f64,
+    /// 从高页翻到矮页后，光标还停在原页边缘时暂时保留的续滚范围。
+    page_scroll_area: Option<Rect>,
 
     // 拖入
     pub(crate) drag_hot: bool,
@@ -880,11 +892,6 @@ pub struct App {
     system_idle: Option<f64>,
     last_cursor: Option<Pos2>,
     pet_a: f32,
-    pet_flipped: bool,
-    /// 顶部落在左端时，窗口向左多出的逻辑宽度。
-    pub(crate) pet_gutter: f32,
-    pet_x: Spring,
-    pet_y: Spring,
     last_t: Option<f64>,
     pub(crate) t: f64,
     pub(crate) dt: f32,
@@ -987,7 +994,7 @@ impl App {
             dots: std::array::from_fn(|i| Spring::new(if i == initial_page { 16.0 } else { 4.0 }, 380.0, 0.86)),
             wheel_delta: 0.0,
             wheel_at: -1.0,
-            wheel_page_at: -1.0,
+            wheel_page_at: -1.0, page_scroll_area: None,
             drag_hot: false,
             drag_a: 0.0,
             drag_saved: None,
@@ -1041,10 +1048,6 @@ impl App {
             last_input: 0.0, system_idle: None,
             last_cursor: None,
             pet_a: 0.0,
-            pet_flipped: false,
-            pet_gutter: 0.0,
-            pet_x: Spring::new(0.0, 280.0, 0.85),
-            pet_y: Spring::new(0.0, 280.0, 0.85),
             last_t: None,
             t: 0.0,
             dt: 0.0,
@@ -1838,11 +1841,7 @@ impl App {
     }
 
     pub(crate) fn effective_minimal(&self)->bool {self.settings.minimal || self.browser_minimal_active}
-    pub fn pet_gutter(&self)->f32 {self.pet_gutter}
-    pub(crate) fn pet_visible(&self)->bool {self.settings.pet && !self.effective_minimal()}
-    /// 占常驻槽。旁置和左右贴边都不占槽。
-    pub(crate) fn pet_in_slot(&self)->bool {self.pet_visible() && !self.side() && self.settings.pet_place==model::PetPlace::Island}
-    pub(crate) fn pet_enabled(&self)->bool {self.pet_in_slot()}
+    pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal() && !self.side()}
     pub(crate) fn pet_space(&self)->f32 {if self.pet_enabled(){44.0}else{0.0}}
     fn lyric_focus_space(&self)->f32 {if self.pomo.running{crate::focus_bar::LYRIC_WIDTH+10.0}else{0.0}}
     fn lyric_bar_width(&self)->f32 {LYRIC_BAR_W+if self.pet_enabled(){48.0}else{0.0}+self.lyric_focus_space()}
@@ -2115,7 +2114,7 @@ impl App {
         self.resident_power=(env.battery,env.charging);
         let show_music_slot=self.media.is_music()&&!bell&&!self.auto_now_playing();
         // 会话不占常驻行，挂在右侧通知上，避免把顶行撑宽后歌词对不齐。
-        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_in_slot(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem,false,self.offwork_live());
+        let mut layout=Layout::new(self.settings.show_battery&&env.battery.is_some(),self.quota_bar_indices().len(),show_music_slot,self.pomo.running,bell,self.pet_enabled(),self.weather_pill().is_some(),self.nudge_icon_visible(),self.settings.show_cpu,self.settings.show_mem,false,self.offwork_live());
         layout.reorder(&self.settings.resident_order);
         for (position,extra) in self.quota_balance_layout(&ctx){layout.balance_tail(position,extra);}
         if self.settings.clock_period!=0 { layout.widen_clock(40.0); }
@@ -2125,14 +2124,9 @@ impl App {
             layout.widen(bar::REMOTE_TODO, 6.0);
         }
         if !self.settings.show_clock {layout.hide_clock();}
-        if self.offwork_live() {
-            let mut baseline=layout.clone();
-            baseline.hide_slot(bar::OFFWORK);
-            let configured=crate::model::island_width_value(self.settings.island_width) as f32;
-            let cap=if configured==0.0 {baseline.width} else {configured.max(baseline.width)};
-            layout.fit_within(cap);
-        }
-        if self.pet_in_slot() {
+        // 倒计时和其它常驻项一起算进宽度。只有整排超过屏幕能放下的上限，才从内存、CPU 开始收。
+        layout.fit_within(Self::island_width_cap());
+        if self.pet_enabled() {
             if let Some(a)=self.notice.as_ref().filter(|_|!self.compact_notices()&&!self.open){layout.x[bar::PET]=Some(22.0-(self.notice_size(a).0+self.pet_space())/2.0);}
             else if self.island_lyrics_active() {
                 // 吉祥物独占歌词岛左侧槽，与封面、歌词分开，演唱时仍可见。
@@ -2189,7 +2183,12 @@ impl App {
         let p_prev = self.progress();
         let hit = if side {self.side_hit_rect(win,p_prev)} else {self.hit_rect(cx, top, p_prev)};
         let previous_menu=self.shelf_menu_rect.take();
-        let inside = env.cursor.is_some_and(|c| hit.contains(c) || previous_menu.is_some_and(|r|r.contains(c)));
+        let page_before=self.page;
+        self.page_scroll_area=self.page_scroll_area.filter(|area|self.open && !self.hover_lock
+            && !env.fullscreen_hidden && !env.screen_locked && env.cursor.is_some_and(|c|area.contains(c))
+            && !ctx.input(|i|i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)));
+        let on_island = env.cursor.is_some_and(|c| hit.contains(c) || previous_menu.is_some_and(|r|r.contains(c)));
+        let inside = on_island || self.page_scroll_area.is_some_and(|area|env.cursor.is_some_and(|c|area.contains(c)));
         // 收起时右侧通知自己接收点击。光标停在上面不开始展开，避免图标淡掉后点不中。
         let stack_now=self.messenger_badge_rect(win,self.island_rect(win,self.w.pos,self.h.pos)).filter(|_|self.messenger_appear()<0.02);
         let on_stack=env.cursor.is_some_and(|c|stack_now.is_some_and(|r|r.contains(c)));
@@ -2210,7 +2209,8 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.is_editing() {
             self.cancel_edit();
         }
-        if (!self.is_editing() || self.todo_choosing) && inside && self.open && self.reveal > 0.95 {
+        let page_hover=inside || self.page_scroll_area.is_some();
+        if (!self.is_editing() || self.todo_choosing) && page_hover && self.open && self.reveal > 0.95 {
             let (scroll, left, right, esc) = ctx.input(|i| (i.raw_scroll_delta.y, i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight), i.key_pressed(egui::Key::Escape)));
             if esc { self.hover_lock = true; }
             if (left || right) && !self.todo_choosing {
@@ -2218,7 +2218,7 @@ impl App {
                 self.navigate_page(right);
             } else if scroll!=0.0 {
                 let cursor=env.cursor.unwrap()-self.content_origin(win).to_vec2();
-                let mail_reading=self.page==5 && self.mail.open_uid.is_some();
+                let mail_reading=on_island && self.page==5 && self.mail.open_uid.is_some();
                 let mail_list=self.page==5 && !self.mail.accounts.is_empty() && self.mail.open_uid.is_none() && self.mail_list_bounds().contains(cursor);
                 let music_volume=self.page==0 && (Rect::from_min_max(Pos2::new(354.0,106.0),Pos2::new(380.0,130.0)).contains(cursor)
                     || self.music_volume_open && crate::pages::MUSIC_VOLUME_RECT.contains(cursor));
@@ -2264,10 +2264,10 @@ impl App {
             }
         } else {self.wheel_delta=0.0;}
         let volume_dragging=self.music_volume_open && ctx.is_being_dragged(egui::Id::new(("card-drag",true,"m-volume-track")));
-        let want = (inside && !self.offwork_finale_showing() && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || volume_dragging || (self.is_editing() && self.open);
+        let want = (page_hover && !self.offwork_finale_showing() && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || volume_dragging || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
-        self.place_pet(win, env, dt);
         self.update_pet(env, cx);
+        if self.offwork_sheet_playing() { ctx.request_repaint(); }
 
         // ---------- 绘制 ----------
         let p = self.progress();
@@ -2294,7 +2294,8 @@ impl App {
             }
         }
         let body=notice_shape.map_or(body,|notice|body.union(notice));
-        let minimal_pill = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until && pc < 0.02;
+        let minimal_strip = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until;
+        let minimal_pill = minimal_strip && pc < 0.02;
         let flare = if minimal_pill || pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
         let thickness = if side { crate::side_dock::SIDE_BAR_W } else { BAR_H };
@@ -2442,20 +2443,18 @@ impl App {
             if ctx.input(|i|i.pointer.any_pressed()&&i.pointer.interact_pos().is_some_and(|p|!rect.contains(p)&&!notice_rect.is_some_and(|r|r.contains(p)))){self.notice_details=false;}
         }
         let pet_alpha=self.pet_a*(1.0-smoothstep(0.0,0.3,pc));
-        let pet_sprite=if pet_alpha>0.004 && !minimal_pill && !self.offwork_finale_showing() {
-            if self.pet_in_slot() {
-                // 播放中加高后吉祥物仍贴在原来的顶行，不要被垂直居中拉到两行中间。
-                let y=if self.auto_now_playing() && p < 0.2 {0.0} else {(h.min(self.base_size().1)-BAR_H).max(0.0)/2.0};
-                // 吉祥物跟随皮肤换色：浅色底上变成深色版本，保持清晰。
-                let fit=if self.island_lyrics_active()||self.notice.is_some(){1.0}else{((WIN_W-32.0)/self.resident.target.width).min(1.0)};
-                self.pet.draw(&base.scaled(cx-origin.x,15.0,fit).shifted(0.0,y).faded(pet_alpha),cx-origin.x+self.resident.position(bar::PET),self.t,self.skin_palette());
-                None
-            } else {self.draw_beside_pet(ui,pet_alpha)}
-        } else {None};
+        if pet_alpha>0.004 && !minimal_pill && !self.offwork_finale_showing() && self.pet_enabled() {
+            // 播放中加高后吉祥物仍贴在原来的顶行，不要被垂直居中拉到两行中间。
+            let y=if self.auto_now_playing() && p < 0.2 {0.0} else {(h.min(self.base_size().1)-BAR_H).max(0.0)/2.0};
+            // 吉祥物跟随皮肤换色：浅色底上变成深色版本，保持清晰。
+            let fit=if self.island_lyrics_active()||self.notice.is_some(){1.0}else{((WIN_W-32.0)/self.resident.target.width).min(1.0)};
+            self.pet.draw(&base.scaled(cx-origin.x,15.0,fit).shifted(0.0,y).faded(pet_alpha),cx-origin.x+self.resident.position(bar::PET),self.t,self.skin_palette());
+        }
+        let mut page_transition=false;
         if reveal > 0.004 && !banner && !nudge_banner && !restoring_lyrics {
             let c = base.shifted(0.0, (1.0 - reveal) * -5.0).faded(reveal);
             let c = if reveal < 0.6 { c.ghost() } else { c };
-            if self.calendar.draft.is_some(){self.draw_calendar_editor(&c);}else if self.task_dialog.is_some(){self.draw_task_editor(&c);}else{self.panel_body(&c, env, &mut cmds); if self.open && self.nudge_active() { self.draw_todo_nudge(&c, panel, false); }}
+            if self.calendar.draft.is_some(){self.draw_calendar_editor(&c);}else if self.task_dialog.is_some(){self.draw_task_editor(&c);}else{page_transition=self.panel_body(&c, env, &mut cmds); if self.open && self.nudge_active() { self.draw_todo_nudge(&c, panel, false); }}
             if !self.toast_below {self.toast_layer(&c,106.0);}
         }
         // 岛下的确认提示使用独立裁剪区域，收起时跟随岛体下沿。
@@ -2500,7 +2499,6 @@ impl App {
         if let Some(r)=messenger_rect{region=region.union(r.expand(5.0));}
         if self.auto_now_playing() && !side {region=region.union(body.expand(4.0));}
         if let Some(rect)=notice_shape {region=region.union(rect.expand2(Vec2::new(12.0,8.0)));}
-        if let Some(rect)=pet_sprite {region=region.union(rect.expand(4.0));}
         if let Some(rect)=notice_details {region=region.union(rect.expand(12.0));}
         // 胶囊上方留空的那一小条也要在窗口区域内，阴影才不会被截断。
         if pill && !side {region.min.y=region.min.y.min(win.top());}
@@ -2533,7 +2531,6 @@ impl App {
                 shapes.push(GlassShape::Round(rel(r),radius));
             }
             if let Some(r)=floating_toast {shapes.push(GlassShape::Round(rel(r),11.0));}
-            if let Some(r)=pet_sprite {shapes.push(GlassShape::Round(rel(r),r.height().min(r.width())*0.5));}
             shapes.extend(tooltips.iter().map(|r|GlassShape::Round(rel(*r),6.0)));
             shapes
         });
@@ -2548,7 +2545,6 @@ impl App {
             || (self.drag_a > 0.001 && self.drag_a < 0.999)
             || self.drag_hot
             || (self.pet_a > 0.001 && self.pet_a < 0.999)
-            || !self.pet_x.settled(100.0) || !self.pet_y.settled(100.0)
             || !self.resident.settled()
             || self.open && self.page==3 && self.shelf_x.values().any(|s| !s.settled(68.0))
             || self.open && self.page==2 && (!self.water_ring.settled(1.0) || !self.sit_view_t.settled(1.0) || !self.sit_t.settled(1.0))
@@ -2564,6 +2560,22 @@ impl App {
         let animating=transitioning || ambient || pet_visible && self.pet.state!=PetState::Sleeping;
         // 交互形变保持 60 帧，媒体 30 帧；小表情 20 帧，睡眠 10 帧，静态界面每秒核对提醒。
         let repaint_after=std::time::Duration::from_secs_f64(if transitioning{1.0/60.0}else if ambient{1.0/30.0}else if pet_visible{if self.pet.state==PetState::Sleeping{0.1}else{0.05}}else{1.0});
+        let next_hit=if side {self.side_hit_rect(win,self.progress())} else {self.hit_rect(cx,top,self.progress())};
+        if page_before!=self.page && self.open {
+            let previous=self.page_scroll_area.map_or(hit,|area|hit.union(area));
+            // 保留缩短一侧原有的整段宽度，并和新页重叠一点，避免在边缘来回挪动时误收起。
+            self.page_scroll_area=env.cursor.filter(|&c|previous.contains(c)).and_then(|c|{
+                let mut band=previous;
+                if previous.bottom()>next_hit.bottom() && c.y>=next_hit.bottom()-PAGE_EDGE_OVERLAP {
+                    band.min.y=next_hit.bottom()-PAGE_EDGE_OVERLAP;
+                } else if previous.top()<next_hit.top() && c.y<=next_hit.top()+PAGE_EDGE_OVERLAP {
+                    band.max.y=next_hit.top()+PAGE_EDGE_OVERLAP;
+                } else {
+                    return None;
+                }
+                Some(band)
+            });
+        }
         cmds.append(&mut self.pending);
         let _ = crate::paint::take_control_hits();
         FrameOut {
@@ -2575,12 +2587,14 @@ impl App {
                 under.map_or(hit,|under|hit.union(under))
             }),
             notice_hit:notice_shape.into_iter().chain(notice_details).chain(messenger_rect).chain(self.shelf_menu_rect).reduce(|a,b|a.union(b)).map(rel),
-            pet_hit:pet_sprite.map(rel),
             file_drop_zone:self.settings.visible_pages[3].then(||rel(if side {self.island_rect(win,PW,self.expanded_height())} else {Rect::from_min_size(Pos2::new(cx-PW/2.0,top),Vec2::new(PW,96.0))})),
             expanded: self.open,
             editing: self.is_editing(),
             animating,
             repaint_after,
+            page_scroll_area:self.page_scroll_area.map(rel),
+            click_through: minimal_strip && !self.open && self.position_drag.is_none(),
+            page_transition,
             cmds,
         }
     }
@@ -3358,7 +3372,7 @@ impl App {
             let content_width=self.lyric_island_width()-self.lyric_focus_space();
             let width=self.w.pos.max(content_width);
             let left=local_cx-width/2.0;
-            let pet_slot=if self.pet_in_slot(){48.0}else{0.0};
+            let pet_slot=if self.pet_enabled(){48.0}else{0.0};
             let music_left=left+pet_slot;
             let music_w=(content_width-pet_slot).max(LYRIC_BAR_W.min(content_width));
             let center_y=self.island_lyric_bar_height()/2.0;
@@ -3555,7 +3569,9 @@ impl App {
             if let Some(x)=layout.x[bar::REMOTE_TODO] { self.draw_resident_todo_nudge(&c,local_cx+x,&layout); }
         }
         if self.pomo.running && compact_alpha>0.004 {
-            crate::focus_bar::draw(&base.faded(compact_alpha),local_cx+layout.x[bar::FOCUS].unwrap(),15.0,self.t,&self.pomo,self.phase_secs(self.pomo.phase),false);
+            if let Some(x)=layout.x[bar::FOCUS] {
+                crate::focus_bar::draw(&base.faded(compact_alpha),local_cx+x,15.0,self.t,&self.pomo,self.phase_secs(self.pomo.phase),false);
+            }
         }
         // 播放中：原常驻行保持不动，媒体条画在它下面。
         if self.auto_now_playing() && compact_alpha>0.004 {
@@ -3579,56 +3595,17 @@ impl App {
         if reveal>0.004 {self.shared_header(&base.faded(reveal),base.origin.x+PW/2.0,1.0,reveal,env);}
     }
 
-    fn place_pet(&mut self, win: Rect, env: &Env, dt: f32) {
-        if !self.pet_visible() || self.pet_in_slot() {
-            self.pet_gutter=0.0;
-            self.pet_x.snap(self.pet_x.pos);
-            self.pet_y.snap(self.pet_y.pos);
-            return;
-        }
-        let (bw,bh)=self.base_size();
-        let island=self.island_rect(win,bw,bh);
-        let panel=self.island_rect(win,PW,self.expanded_height());
-        let work=env.screen.unwrap_or(Rect::from_min_max(Pos2::new(-1.0e5,-1.0e5),Pos2::new(1.0e5,1.0e5)));
-        let notice=if self.dock()==model::Dock::Top {self.notice_rect(win.center().x,island.top())}else{None};
-        let spot=crate::pet_place::resolve(self.dock(),self.settings.pet_place,island,panel,self.open||self.progress()>0.04,work,notice,self.pet_flipped);
-        self.pet_flipped=spot.flipped;
-        let animate=self.pet_x.target!=0.0 || self.pet_y.target!=0.0;
-        if !animate || !bar::animations_enabled() {
-            self.pet_x.snap(spot.center.x);
-            self.pet_y.snap(spot.center.y);
-        } else {
-            self.pet_x.target=spot.center.x;
-            self.pet_y.target=spot.center.y;
-            self.pet_x.step(dt);
-            self.pet_y.step(dt);
-        }
-        self.pet_gutter=crate::pet_place::gutter(self.dock(),spot.center,island,bw);
-    }
-    fn draw_beside_pet(&mut self, ui: &egui::Ui, alpha: f32) -> Option<Rect> {
-        let scale=self.settings.island_scale();
-        let center=Pos2::new(self.pet_x.pos,self.pet_y.pos);
-        let rect=Rect::from_center_size(center,Vec2::new(crate::pet_place::SPRITE_W*scale,crate::pet_place::SPRITE_H*scale));
-        let card=Card::new(ui,Pos2::new(center.x-24.0,center.y-15.0),ui.max_rect()).scaled(24.0,15.0,scale).faded(alpha);
-        self.pet.draw(&card,24.0,self.t,self.skin_palette());
-        Some(rect)
-    }
     fn update_pet(&mut self, env: &Env, cx: f32) {
-        let beside=!self.pet_in_slot() && self.pet_visible();
-        let anchor=if beside {Pos2::new(self.pet_x.pos,self.pet_y.pos)}else{Pos2::new(cx+self.resident.position(bar::PET),15.0)};
+        let cx=cx+self.resident.position(bar::PET);
         let idle = self.idle_for();
         if self.pet.last_idle >= self.opts.pet_idle && idle < 1.0
             && matches!(self.pet.state, PetState::Dozing | PetState::Sleeping) {
             self.pet.waking_until = self.t + 2.2;
         }
         self.pet.last_idle = idle;
-        self.pet.hovered = env.cursor.is_some_and(|p| if beside {
-            (p.x-anchor.x).abs()<=28.0 && (p.y-anchor.y).abs()<=20.0
-        } else {
-            (p.x-anchor.x).abs() <= BAR_W/2.0+24.0 && (0.0..70.0).contains(&p.y)
-        });
+        self.pet.hovered = env.cursor.is_some_and(|p| (p.x-cx).abs() <= BAR_W/2.0+24.0 && (0.0..70.0).contains(&p.y));
         self.pet.worried = self.settings.show_battery && env.battery.is_some_and(|v|v<=20) && !env.charging || env.network == Some(false);
-        let allowed = self.pet_visible();
+        let allowed = self.pet_enabled();
         if !allowed { self.pet.reaction = None; self.pet.waking_until = 0.0; self.pet.expressions.clear(); }
         let available = allowed && !self.open && !self.drag_hot;
         let shown = available;
@@ -3636,15 +3613,16 @@ impl App {
         let visible = available && self.pet_a > 0.7 && self.progress() < 0.1;
         self.pet.advance(self.dt, visible);
         let state = self.pet_state();
-        let gaze = env.cursor.map(|p| [((p.x-anchor.x)/28.0).clamp(-3.0,3.0), ((p.y-anchor.y)/40.0).clamp(-1.0,1.5)])
+        let gaze = env.cursor.map(|p| [((p.x-cx)/28.0).clamp(-3.0,3.0), ((p.y-15.0)/40.0).clamp(-1.0,1.5)])
             .unwrap_or([(self.t as f32 * 0.35).sin()*0.8, 0.0]);
         self.pet.step(state, self.t, self.dt, gaze, visible);
+        self.offwork_face(self.dt, visible);
     }
 
     // ---------------------------------------------------------------
     // 面板主体：页标题 + 页面（带切页过渡）+ 翻页箭头 + 页码豆
     // ---------------------------------------------------------------
-    fn panel_body(&mut self, c: &Card, env: &Env, cmds: &mut Vec<Cmd>) {
+    fn panel_body(&mut self, c: &Card, env: &Env, cmds: &mut Vec<Cmd>) -> bool {
         let settings=c.hit(380.0,4.0,28.0,28.0,"page-settings").on_hover_text(format!("打开{}设置窗口",PAGE_NAMES[self.page]));
         let (hover,press)=c.hover_t(&settings);
         c.circle(394.0,18.0,13.0,Color32::from_white_alpha((hover*24.0) as u8));
@@ -3660,7 +3638,7 @@ impl App {
             if c.hit(9.0,7.0,28.0,23.0,"subpage-back").clicked(){
                 if self.page==2 && self.health_time {self.health_time=false;} else {self.subpage=None;self.settings_editing=false;}
             }
-            self.page_settings(c);self.nav(c);return;
+            self.page_settings(c);self.nav(c);return false;
         }
         let e = self.page_e();
         let in_tx = e < 0.55 && self.page_from != self.page;
@@ -3685,6 +3663,11 @@ impl App {
         }
         self.nav(c);
         if self.page==0 && c.live {self.draw_music_volume(c,cmds);}
+        in_tx
+    }
+
+    pub fn cancel_page_scroll(&mut self) {
+        self.page_scroll_area=None;
     }
 
     fn page_title(&self, page: usize, c: &Card) {

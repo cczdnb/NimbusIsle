@@ -186,25 +186,6 @@ impl Dock {
     pub fn is_side(self) -> bool { self != Self::Top }
 }
 
-/// 吉祥物相对岛体的落点。岛头、岛尾沿岛的长边，不按屏幕左右。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PetPlace {
-    #[default]
-    Island,
-    Head,
-    Tail,
-    Auto,
-}
-
-impl PetPlace {
-    pub fn key(self) -> &'static str {
-        match self { Self::Island => "island", Self::Head => "head", Self::Tail => "tail", Self::Auto => "auto" }
-    }
-    pub fn parse(value: &str) -> Self {
-        match value { "head" => Self::Head, "tail" => Self::Tail, "auto" => Self::Auto, _ => Self::Island }
-    }
-}
-
 /// 岛体大小（百分比）的范围与步进。这是整体缩放，不是高度。
 pub const ISLAND_SIZE_MIN: u32 = 80;
 pub const ISLAND_SIZE_MAX: u32 = 140;
@@ -305,8 +286,6 @@ pub struct Settings {
     pub dock: Dock,
     pub settings_theme: crate::settings_theme::SettingsTheme,
     pub pet: bool,
-    /// 吉祥物落在岛上槽位，或贴在岛头、岛尾。默认岛上。
-    pub pet_place: PetPlace,
     pub minimal: bool,
     pub browser_minimal: bool,
     pub avoid_browsers: bool,
@@ -420,7 +399,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, pet_place: PetPlace::Island, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9,10], show_clock: true, show_battery: true, show_weather: true, weather_scene: true, show_cpu: false, show_mem: false, offwork: false, offwork_start: 9 * 60, offwork_end: 18 * 60, offwork_weekdays: true, offwork_soon: 30, offwork_own_faces: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false, session_keep_mins: 10, session_sources: crate::agent_session::Source::ALL_BITS }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9,10], show_clock: true, show_battery: true, show_weather: true, weather_scene: true, show_cpu: false, show_mem: false, offwork: false, offwork_start: 9 * 60, offwork_end: 18 * 60, offwork_weekdays: true, offwork_soon: 30, offwork_own_faces: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false, session_keep_mins: 10, session_sources: crate::agent_session::Source::ALL_BITS }
     }
 }
 
@@ -495,7 +474,6 @@ impl Settings {
                 "island_offset" => s.island_offset = v.parse::<i32>().unwrap_or(0).clamp(-ISLAND_OFFSET_MAX, ISLAND_OFFSET_MAX),
                 "oled_shift" => s.oled_shift = v != "0",
                 "pet" => s.pet = v == "1" || v.eq_ignore_ascii_case("true"),
-                "pet_place" => s.pet_place = PetPlace::parse(&v),
                 "minimal" => s.minimal = v == "1" || v.eq_ignore_ascii_case("true"),
                 "browser_minimal" => s.browser_minimal = v == "1",
                 "avoid_browsers" => s.avoid_browsers = v != "0",
@@ -652,7 +630,6 @@ impl Settings {
                 ("oled_shift".into(),(self.oled_shift as u8).to_string()),
                 ("settings_theme".into(),self.settings_theme.key().into()),
                 ("pet".into(), if self.pet { "1".to_string() } else { "0".to_string() }),
-                ("pet_place".into(), self.pet_place.key().into()),
                 ("minimal".into(), if self.minimal { "1".to_string() } else { "0".to_string() }),
                 ("browser_minimal".into(), (self.browser_minimal as u8).to_string()),
                 ("avoid_browsers".into(), (self.avoid_browsers as u8).to_string()),
@@ -1104,25 +1081,6 @@ pub fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pet_place_roundtrip_defaults_to_the_island() {
-        let _guard=crate::ui_tests::ENV_LOCK.lock().unwrap_or_else(|error|error.into_inner());
-        let dir=std::env::temp_dir().join(format!("yunyu-pet-place-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("YUNYU_DATA_DIR",&dir);
-        fs::write(dir.join("settings.txt"),"pet=1\n").unwrap();
-        assert_eq!(Settings::load().pet_place,PetPlace::Island,"缺省落点是岛上");
-        let mut settings=Settings::default();
-        settings.pet_place=PetPlace::Tail;
-        settings.save();
-        assert_eq!(Settings::load().pet_place,PetPlace::Tail);
-        settings.pet_place=PetPlace::Island;
-        settings.save();
-        let text=fs::read_to_string(dir.join("settings.txt")).unwrap();
-        assert!(text.lines().any(|line|line=="pet_place=island"),"写回应是 pet_place=island");
-        let _=fs::remove_dir_all(dir);
-    }
 
     #[test]
     fn notification_dwell_stays_between_two_and_ten_seconds() {

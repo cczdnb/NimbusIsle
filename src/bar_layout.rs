@@ -354,15 +354,19 @@ mod tests {
         assert!((layout.x[OFFWORK].unwrap()-left).abs()<0.01);
     }
     #[test]
-    fn countdown_fits_in_the_width_the_bar_already_had(){
+    fn countdown_grows_the_bar_until_the_screen_cap(){
         let mut layout=Layout::new(true,1,true,true,false,true,true,false,true,true,false,true);
         let mut baseline=layout.clone();
         baseline.hide_slot(OFFWORK);
-        let cap=baseline.width;
-        assert!(layout.width>cap+20.0);
-        layout.fit_within(cap);
-        assert!(layout.width<=cap+0.5,"倒计时不应把岛再拉长");
+        assert!(layout.width>baseline.width+20.0,"倒计时应把岛拉长");
+        layout.fit_within(608.0);
         assert!(layout.x[OFFWORK].is_some() && layout.x[CLOCK].is_some());
-        assert!(layout.x[MEM].is_none() || layout.x[CPU].is_none());
+        assert!(layout.x[CPU].is_some() && layout.x[MEM].is_some(),"未顶到屏幕边时不能收起 CPU 和内存");
+        let mut crowded=Layout::new(true,1,true,true,false,true,true,false,true,true,false,true);
+        let cap=baseline.width;
+        crowded.fit_within(cap);
+        assert!(crowded.width<=cap+0.5);
+        assert!(crowded.x[OFFWORK].is_some() && crowded.x[CLOCK].is_some());
+        assert!(crowded.x[MEM].is_none() || crowded.x[CPU].is_none(),"超过上限时先收起内存或 CPU");
     }
 }
