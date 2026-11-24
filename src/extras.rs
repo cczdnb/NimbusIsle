@@ -1357,7 +1357,7 @@ impl App {
             settings_control_row_right(ui, "位置", |ui| {
                 settings_segmented(ui, &mut self.settings.desk_pet.free, &[(false, "贴在岛左侧"), (true, "自由放置")], 96.0);
             });
-            settings_hint(ui, "贴在岛左侧时跟着岛走，猫从药丸旁边向下垂；贴边放不下就换到另一侧。自由放置时按住身体拖动，松手后记住位置。");
+            settings_hint(ui, "贴在岛左侧时，猫和键盘离岛 8 像素，跟着岛走，从药丸旁边向下垂；这一侧放不下就换到另一侧。自由放置时按住身体拖动，松手记住位置。拖到屏幕边时，猫和键盘可以贴边。");
             ui.separator();
             let mut scale = self.settings.desk_pet.scale;
             if setting_number(ui, "大小", &mut scale, 10, 150, " %", 5.0) {

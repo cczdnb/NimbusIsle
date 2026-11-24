@@ -172,38 +172,90 @@ pub fn pill_px(origin: (i32, i32), ppp: f32, dock: Dock, canvas: (f32, f32), siz
     Px { left: px(x), top: py(y), right: px(x + width), bottom: py(y + height) }
 }
 
-fn fits(x: i32, y: i32, size: (i32, i32), monitor: Px) -> bool {
-    x >= monitor.left && y >= monitor.top && x.saturating_add(size.0) <= monitor.right && y.saturating_add(size.1) <= monitor.bottom
+/// 猫、键盘和鼠标在窗口里的范围，相对窗口宽高的 0 到 1。其余是透明边，可以探出屏幕。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Content {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
 }
 
-fn clamp_origin(x: i32, y: i32, size: (i32, i32), monitor: Px) -> (i32, i32) {
-    let max_x = (monitor.right - size.0).max(monitor.left);
-    let max_y = (monitor.bottom - size.1).max(monitor.top);
-    (x.clamp(monitor.left, max_x), y.clamp(monitor.top, max_y))
+impl Content {
+    pub const fn full() -> Self { Self { x: 0.0, y: 0.0, w: 1.0, h: 1.0 } }
+
+    pub fn normalized(self) -> Option<Self> {
+        if ![self.x, self.y, self.w, self.h].into_iter().all(|value| value.is_finite()) { return None; }
+        let x = self.x.clamp(0.0, 1.0);
+        let y = self.y.clamp(0.0, 1.0);
+        let w = self.w.clamp(0.0, 1.0 - x);
+        let h = self.h.clamp(0.0, 1.0 - y);
+        (w >= 0.2 && h >= 0.2).then_some(Self { x, y, w, h })
+    }
 }
 
-/// 贴在岛的内侧。顶部停靠先放左侧；左右停靠放屏幕内侧。这一侧放不下就换到另一侧。
-pub fn docked_origin(island: Px, size: (i32, i32), monitor: Px, gap: i32, prefer_right: bool) -> (i32, i32) {
-    let beside = |right: bool| {
-        let x = if right { island.right.saturating_add(gap) } else { island.left.saturating_sub(gap).saturating_sub(size.0) };
+fn content_span(size: i32, start: f64, length: f64) -> (i32, i32) {
+    let begin = (start * size as f64).round() as i32;
+    let end = ((start + length) * size as f64).round() as i32;
+    (begin, end.max(begin + 1))
+}
+
+fn window_limits(size: (i32, i32), content: Content, monitor: Px) -> (i32, i32, i32, i32) {
+    let content = content.normalized().unwrap_or(Content::full());
+    let (left, right) = content_span(size.0, content.x, content.w);
+    let (top, bottom) = content_span(size.1, content.y, content.h);
+    (monitor.left - left, monitor.right - right, monitor.top - top, monitor.bottom - bottom)
+}
+
+fn clamp_limits(x: i32, y: i32, limits: (i32, i32, i32, i32)) -> (i32, i32) {
+    let (min_x, max_x, min_y, max_y) = limits;
+    (if min_x > max_x { min_x } else { x.clamp(min_x, max_x) }, if min_y > max_y { min_y } else { y.clamp(min_y, max_y) })
+}
+
+/// 让内容留在屏幕内。窗口原点可以探出屏幕，透明边跟着出去。
+pub fn clamp_window(x: i32, y: i32, size: (i32, i32), content: Content, monitor: Px) -> (i32, i32) {
+    clamp_limits(x, y, window_limits(size, content, monitor))
+}
+
+/// 原先整窗贴着屏幕边时，改成让猫和键盘贴边。屏幕中间的位置不动。
+fn settle_window(x: i32, y: i32, size: (i32, i32), content: Content, monitor: Px) -> (i32, i32) {
+    let full = window_limits(size, Content::full(), monitor);
+    let next = window_limits(size, content, monitor);
+    let x = if x == full.1 { next.1 } else if x == full.0 { next.0 } else { x };
+    let y = if y == full.3 { next.3 } else if y == full.2 { next.2 } else { y };
+    clamp_limits(x, y, next)
+}
+
+fn content_inside(origin: (i32, i32), size: (i32, i32), content: Content, monitor: Px) -> bool {
+    let (left, right) = content_span(size.0, content.x, content.w);
+    let (top, bottom) = content_span(size.1, content.y, content.h);
+    origin.0 + left >= monitor.left && origin.1 + top >= monitor.top && origin.0 + right <= monitor.right && origin.1 + bottom <= monitor.bottom
+}
+
+/// 贴在岛的内侧。缝算到猫和键盘的边缘，不把透明边算进去。这一侧放不下就换到另一侧。
+pub fn docked_origin(island: Px, size: (i32, i32), content: Content, monitor: Px, gap: i32, prefer_right: bool) -> (i32, i32) {
+    let content = content.normalized().unwrap_or(Content::full());
+    let (left, right) = content_span(size.0, content.x, content.w);
+    let beside = |on_right: bool| {
+        let x = if on_right { island.right + gap - left } else { island.left - gap - right };
         (x, island.top)
     };
     let primary = beside(prefer_right);
     let secondary = beside(!prefer_right);
-    if fits(primary.0, primary.1, size, monitor) { primary }
-    else if fits(secondary.0, secondary.1, size, monitor) { secondary }
-    else { clamp_origin(primary.0, primary.1, size, monitor) }
+    if content_inside(primary, size, content, monitor) { primary }
+    else if content_inside(secondary, size, content, monitor) { secondary }
+    else { clamp_window(primary.0, primary.1, size, content, monitor) }
 }
 
 /// 算出这一帧窗口的物理位置。自由放置第一次出现时，把当时贴岛的位置记下来。
-pub fn place(prefs: &mut Prefs, anchor: &Anchor) -> (i32, i32, i32, i32, bool) {
+pub fn place(prefs: &mut Prefs, anchor: &Anchor, content: Content) -> (i32, i32, i32, i32, bool) {
     let ppp = if anchor.ppp.is_finite() && anchor.ppp > 0.0 { anchor.ppp } else { 1.0 };
     let logical = logical_size(prefs.layout_104, prefs.scale);
     let size = ((logical.0 * ppp).round() as i32, (logical.1 * ppp).round() as i32);
     let island = pill_px(anchor.origin, ppp, anchor.dock, anchor.canvas, anchor.pill, anchor.edge_gap);
     let gap = (8.0 * ppp).round() as i32;
     let prefer_right = anchor.dock == Dock::Left;
-    let docked = docked_origin(island, size, anchor.monitor, gap, prefer_right);
+    let docked = docked_origin(island, size, content, anchor.monitor, gap, prefer_right);
     let mut changed = false;
     let (x, y) = if prefs.free {
         if prefs.x.is_none() || prefs.y.is_none() {
@@ -211,7 +263,7 @@ pub fn place(prefs: &mut Prefs, anchor: &Anchor) -> (i32, i32, i32, i32, bool) {
             prefs.y = Some(docked.1);
             changed = true;
         }
-        let clamped = clamp_origin(prefs.x.unwrap_or(docked.0), prefs.y.unwrap_or(docked.1), size, anchor.monitor);
+        let clamped = settle_window(prefs.x.unwrap_or(docked.0), prefs.y.unwrap_or(docked.1), size, content, anchor.monitor);
         if prefs.x != Some(clamped.0) || prefs.y != Some(clamped.1) {
             prefs.x = Some(clamped.0);
             prefs.y = Some(clamped.1);
@@ -224,15 +276,27 @@ pub fn place(prefs: &mut Prefs, anchor: &Anchor) -> (i32, i32, i32, i32, bool) {
     (x, y, size.0.max(1), size.1.max(1), changed)
 }
 
+fn message_value(text: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    match value {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).ok(),
+        other => Some(other),
+    }
+}
+
 /// 命中区消息。页面可能把 JSON 再包成一层字符串。
 pub fn parse_regions(text: &str) -> Option<Vec<[f64; 4]>> {
-    let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    let value = match value {
-        serde_json::Value::String(inner) => serde_json::from_str(&inner).ok()?,
-        other => other,
-    };
+    let value = message_value(text)?;
     if value.get("t").and_then(|item| item.as_str()) != Some("hit") { return None; }
     serde_json::from_value(value.get("r")?.clone()).ok()
+}
+
+/// 内容范围。太小或不是数字就丢掉，避免把窗口放到屏幕外面。
+pub fn parse_frame(text: &str) -> Option<Content> {
+    let value = message_value(text)?;
+    if value.get("t").and_then(|item| item.as_str()) != Some("frame") { return None; }
+    let raw: [f64; 4] = serde_json::from_value(value.get("r")?.clone()).ok()?;
+    Content { x: raw[0], y: raw[1], w: raw[2], h: raw[3] }.normalized()
 }
 
 /// 头以外的区域（身体、尾巴、键盘、鼠标）可以拖。头和身体重叠时仍算身体，避免只能点到键盘才拖得动。
@@ -377,7 +441,7 @@ mod tests {
     #[test]
     fn top_dock_puts_the_cat_on_the_left_and_flips_at_the_screen_edge() {
         let mut prefs = Prefs::default();
-        let (x, y, w, h, changed) = place(&mut prefs, &anchor(Dock::Top));
+        let (x, y, w, h, changed) = place(&mut prefs, &anchor(Dock::Top), Content::full());
         let island = pill_px((800, 0), 1.0, Dock::Top, (640.0, 270.0), (163.0, 30.0), 6.0);
         assert!(!changed && !prefs.free);
         assert_eq!((w, h), (264, 192));
@@ -385,7 +449,7 @@ mod tests {
         assert_eq!(y, island.top);
         let mut edge = anchor(Dock::Top);
         edge.origin = (0, 0);
-        let (x, _, w, _, _) = place(&mut Prefs::default(), &edge);
+        let (x, _, w, _, _) = place(&mut Prefs::default(), &edge, Content::full());
         let island = pill_px((0, 0), 1.0, Dock::Top, (640.0, 270.0), (163.0, 30.0), 6.0);
         assert!(x >= island.right, "左侧放不下时应改到岛的右侧，实际 {x}");
         assert_eq!(x, island.right + 8);
@@ -395,11 +459,11 @@ mod tests {
     #[test]
     fn free_placement_pins_once_then_stays_put() {
         let mut prefs = Prefs { free: true, ..Prefs::default() };
-        let first = place(&mut prefs, &anchor(Dock::Top));
+        let first = place(&mut prefs, &anchor(Dock::Top), Content::full());
         assert!(first.4 && prefs.x == Some(first.0) && prefs.y == Some(first.1));
         let mut moved = anchor(Dock::Top);
         moved.origin = (1200, 0);
-        let second = place(&mut prefs, &moved);
+        let second = place(&mut prefs, &moved, Content::full());
         assert!(!second.4);
         assert_eq!((second.0, second.1), (first.0, first.1));
     }
@@ -440,5 +504,29 @@ mod tests {
         assert_eq!(key_name(0x19, false), Some(("KeyP", false)));
         assert_eq!(key_name(0x4B, true), Some(("ArrowLeft", false)));
         assert_eq!(key_name(0, false), None);
+    }
+
+    #[test]
+    fn content_can_sit_on_the_screen_edge_while_the_margin_hangs_off() {
+        let content = Content { x: 0.25, y: 0.2, w: 0.5, h: 0.6 };
+        let mut prefs = Prefs { free: true, x: Some(1920 - 264), y: Some(0), ..Prefs::default() };
+        let (x, y, w, h, changed) = place(&mut prefs, &anchor(Dock::Top), content);
+        let right = x + ((content.x + content.w) * w as f64).round() as i32;
+        let top = y + (content.y * h as f64).round() as i32;
+        assert!(changed);
+        assert_eq!(right, 1920, "键盘右侧应贴住屏幕");
+        assert_eq!(top, 0, "猫的上沿应贴住屏幕");
+        assert!(x + w > 1920, "透明边可以探出屏幕");
+        let island = pill_px((800, 0), 1.0, Dock::Top, (640.0, 270.0), (163.0, 30.0), 6.0);
+        let (docked, _, width, _, _) = place(&mut Prefs::default(), &anchor(Dock::Top), content);
+        let edge = docked + ((content.x + content.w) * width as f64).round() as i32;
+        assert_eq!(edge + 8, island.left, "贴岛的缝算到内容边缘");
+    }
+
+    #[test]
+    fn frame_message_rejects_a_box_that_would_let_the_window_fly_off() {
+        let parsed = parse_frame(r#"{"t":"frame","r":[0.2,0.1,0.55,0.7]}"#).expect("内容范围");
+        assert_eq!(parsed, Content { x: 0.2, y: 0.1, w: 0.55, h: 0.7 });
+        assert!(parse_frame(r#"{"t":"frame","r":[0.0,0.0,0.05,0.9]}"#).is_none());
     }
 }

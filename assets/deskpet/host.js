@@ -228,8 +228,30 @@ if (window.chrome && chrome.webview) {
   });
 }
 
+let framed = '';
+function postFrame() {
+  if (!api || !window.chrome || !chrome.webview) return;
+  const sig = `${opts.layout}:${opts.leftMouse ? 1 : 0}`;
+  if (framed === sig) return;
+  const regions = api.hitRegions();
+  if (!regions.length) return;
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const region of regions) {
+    x0 = Math.min(x0, region[0]);
+    y0 = Math.min(y0, region[1]);
+    x1 = Math.max(x1, region[0] + region[2]);
+    y1 = Math.max(y1, region[1] + region[3]);
+  }
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (!(w >= 0.2 && h >= 0.2 && x0 >= 0 && y0 >= 0 && x1 <= 1 && y1 <= 1)) return;
+  framed = sig;
+  chrome.webview.postMessage({ t: 'frame', r: [x0, y0, w, h] });
+}
+
 setInterval(() => {
   if (!api || !window.chrome || !chrome.webview) return;
+  postFrame();
   const regions = api.hitRegions();
   if (regions.length) chrome.webview.postMessage({ t: 'hit', r: regions });
   const state = api.state();

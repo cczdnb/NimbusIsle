@@ -17,7 +17,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, MapVirtualKeyW, MAPVK_VK_TO_VSC_EX, VK_LBUTTON, VK_MENU, VK_RBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use super::{place, Anchor, Prefs, Px};
+use super::{clamp_window, place, Anchor, Content, Prefs, Px};
 
 struct Host {
     hwnd: HWND,
@@ -55,6 +55,7 @@ struct Queued {
 
 static KEYS: Mutex<Keys> = Mutex::new(Keys { held: Vec::new(), queue: Vec::new(), seeded: false });
 static REGIONS: Mutex<Vec<[f64; 4]>> = Mutex::new(Vec::new());
+static FRAME: Mutex<Content> = Mutex::new(Content::full());
 static ERROR: Mutex<String> = Mutex::new(String::new());
 
 thread_local! {
@@ -88,8 +89,9 @@ pub(super) fn sync(prefs: &mut Prefs, anchor: Option<&Anchor>) -> bool {
         }
     }
     let mut changed = false;
+    let content = FRAME.lock().map(|frame| *frame).unwrap_or(Content::full());
     with_host(|host| {
-        let (x, y, w, h, pinned) = place(prefs, anchor);
+        let (x, y, w, h, pinned) = place(prefs, anchor, content);
         changed = pinned;
         host.free = prefs.free;
         host.click_through = prefs.click_through;
@@ -233,7 +235,7 @@ fn attach(hwnd: HWND, controller: ICoreWebView2Controller, folder: &[u16]) -> wi
         let mut token = EventRegistrationToken::default();
         let _ = webview.add_WebMessageReceived(&WebMessageReceivedEventHandler::create(Box::new(|_, args| {
             let Some(args) = args else { return Ok(()) };
-            if let Some(text) = message_text(&args) { store_regions(&text); }
+            if let Some(text) = message_text(&args) { store_message(&text); }
             Ok(())
         })), &mut token);
         let _ = webview.add_NavigationCompleted(&NavigationCompletedEventHandler::create(Box::new(move |_, _| {
@@ -274,9 +276,13 @@ fn message_text(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Option<Strin
     }
 }
 
-fn store_regions(text: &str) {
-    let Some(regions) = super::parse_regions(text) else { return };
-    if let Ok(mut slot) = REGIONS.lock() { *slot = regions; }
+fn store_message(text: &str) {
+    if let Some(regions) = super::parse_regions(text) {
+        if let Ok(mut slot) = REGIONS.lock() { *slot = regions; }
+    }
+    if let Some(frame) = super::parse_frame(text) {
+        if let Ok(mut slot) = FRAME.lock() { *slot = frame; }
+    }
 }
 
 fn fail(hwnd: HWND, message: &str) {
@@ -292,6 +298,7 @@ fn destroy() {
 }
 
 fn destroy_hwnd(hwnd: HWND) {
+    if let Ok(mut frame) = FRAME.lock() { *frame = Content::full(); }
     if let Ok(mut keys) = KEYS.lock() {
         keys.held.clear();
         keys.queue.clear();
@@ -371,7 +378,8 @@ impl Host {
             let y = cursor.1 - self.drag.1;
             let size = (self.rect.2, self.rect.3);
             let monitor = monitor_at(cursor);
-            let (x, y) = clamp_to(x, y, size, monitor);
+            let content = FRAME.lock().map(|frame| *frame).unwrap_or(Content::full());
+            let (x, y) = clamp_window(x, y, size, content, monitor);
             unsafe { let _ = SetWindowPos(self.hwnd, HWND_TOPMOST, x, y, size.0, size.1, SWP_NOACTIVATE); }
             self.rect.0 = x;
             self.rect.1 = y;
@@ -476,12 +484,6 @@ fn normalize(cursor: (i32, i32), monitor: Px) -> (f64, f64) {
     let width = (monitor.right - monitor.left).max(1) as f64;
     let height = (monitor.bottom - monitor.top).max(1) as f64;
     (((cursor.0 - monitor.left) as f64 / width).clamp(0.0, 1.0), ((cursor.1 - monitor.top) as f64 / height).clamp(0.0, 1.0))
-}
-
-fn clamp_to(x: i32, y: i32, size: (i32, i32), monitor: Px) -> (i32, i32) {
-    let max_x = (monitor.right - size.0).max(monitor.left);
-    let max_y = (monitor.bottom - size.1).max(monitor.top);
-    (x.clamp(monitor.left, max_x), y.clamp(monitor.top, max_y))
 }
 
 fn post(webview: &ICoreWebView2, json: &str) {
