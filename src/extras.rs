@@ -1313,9 +1313,9 @@ fn setting_choices(ui:&mut egui::Ui,title:&str,value:&mut u32,values:[u32;3],uni
     let options:Vec<(u32,&str)>=values.iter().zip(labels.iter()).map(|(v,l)|(*v,l.as_str())).collect();
     settings_control_row_right(ui,title,|ui|{settings_segmented(ui,value,&options,62.0);});
 }
-const SETTINGS_GROUPS: [(&str,usize,usize);10] = [
+const SETTINGS_GROUPS: [(&str,usize,usize);11] = [
     ("常规",0,0), ("页面管理",11,11), ("音乐与歌词",1,1), ("专注与饮水",2,3),
-    ("待办与置物",4,6), ("通知、邮箱与日程",7,9), ("AI 额度",12,12), ("会话",14,14), ("天气",13,13), ("关于",10,10),
+    ("待办与置物",4,6), ("通知、邮箱与日程",7,9), ("AI 额度",12,12), ("会话",14,14), ("天气",13,13), ("桌宠",15,15), ("关于",10,10),
 ];
 
 impl App {
@@ -1341,6 +1341,76 @@ impl App {
         settings_hint(ui,"每天走到这个钟点。倒计时算进自动宽度；只有顶到屏幕边，才会先收起内存和 CPU。");
         let status=self.offwork_status();
         ui.label(egui::RichText::new(status).size(12.0).color(settings_color(&ui.ctx().clone(),Color32::from_gray(170),Color32::from_gray(90))));
+    }
+
+    pub(crate) fn desk_pet_settings(&mut self, ui: &mut egui::Ui) {
+        settings_label(ui, "显示");
+        settings_card(ui, |ui| {
+            setting_row(ui, "打开桌宠", "在岛外面养一只会跟着键盘和鼠标动的猫。关掉后窗口消失，下面的选择会保留。", &mut self.settings.desk_pet.enabled);
+            if !self.settings.desk_pet.enabled {
+                settings_hint(ui, "关闭时不创建桌宠窗口。");
+            }
+            if let Some(error) = crate::desk_pet::error() {
+                settings_hint(ui, &error);
+            }
+            ui.separator();
+            settings_control_row_right(ui, "位置", |ui| {
+                settings_segmented(ui, &mut self.settings.desk_pet.free, &[(false, "贴在岛左侧"), (true, "自由放置")], 96.0);
+            });
+            settings_hint(ui, "贴在岛左侧时跟着岛走，猫从药丸旁边向下垂；贴边放不下就换到另一侧。自由放置时按住身体拖动，松手后记住位置。");
+            ui.separator();
+            let mut scale = self.settings.desk_pet.scale;
+            if setting_number(ui, "大小", &mut scale, 10, 150, " %", 5.0) {
+                self.settings.desk_pet.scale = crate::desk_pet::snap_percent(scale);
+            }
+            ui.separator();
+            let mut opacity = self.settings.desk_pet.opacity;
+            if setting_number(ui, "透明度", &mut opacity, 10, 100, " %", 5.0) {
+                self.settings.desk_pet.opacity = opacity.clamp(10, 100);
+            }
+        });
+        settings_label(ui, "外观");
+        settings_card(ui, |ui| {
+            let mut coat = crate::desk_pet::coat_index(&self.settings.desk_pet.coat);
+            let options = crate::desk_pet::COATS.iter().enumerate().map(|(index, (_, name))| (index, *name)).collect::<Vec<_>>();
+            if settings_segmented(ui, &mut coat, &options, 62.0) {
+                self.settings.desk_pet.coat = crate::desk_pet::COATS[coat].0.to_string();
+            }
+        });
+        settings_label(ui, "互动");
+        settings_card(ui, |ui| {
+            settings_control_row_right(ui, "键盘", |ui| {
+                settings_segmented(ui, &mut self.settings.desk_pet.layout_104, &[(false, "65%"), (true, "104")], 72.0);
+            });
+            settings_hint(ui, "104 键会把窗口加宽、加高。");
+            ui.separator();
+            setting_row(ui, "显示按键字母", "抬爪时在键上标出字母。隐私模式打开时不显示。", &mut self.settings.desk_pet.labels);
+            ui.separator();
+            setting_row(ui, "隐私模式", "只区分左右手，不把具体按键发给桌宠。", &mut self.settings.desk_pet.privacy);
+            ui.separator();
+            setting_row(ui, "鼠标在左手边", "鼠标和键盘对调。", &mut self.settings.desk_pet.left_mouse);
+            ui.separator();
+            setting_row(ui, "会不耐烦", "打得太快、一下子按很多键、摸太久，或者把睡着的猫吵醒，它会生气并用尾巴捶桌。", &mut self.settings.desk_pet.annoy);
+            ui.separator();
+            setting_row(ui, "会睡觉", "闲置一段时间后趴下。", &mut self.settings.desk_pet.sleep);
+            if self.settings.desk_pet.sleep {
+                ui.separator();
+                setting_number(ui, "闲置多久睡觉", &mut self.settings.desk_pet.sleep_mins, 1, 120, " 分钟", 1.0);
+            }
+            ui.separator();
+            setting_row(ui, "按住时呼噜", "摸头时发出声音。", &mut self.settings.desk_pet.purr);
+            ui.separator();
+            setting_row(ui, "睡觉时呼噜", "睡着以后发出声音。", &mut self.settings.desk_pet.purr_sleep);
+            ui.separator();
+            setting_row(ui, "锁定点击穿透", "整窗不接收鼠标，点击落到下面的窗口。", &mut self.settings.desk_pet.click_through);
+            if self.settings.desk_pet.click_through {
+                settings_hint(ui, "按住 Alt 可以临时拖动或摸猫。");
+            }
+        });
+        settings_label(ui, "我的猫");
+        settings_card(ui, |ui| {
+            ui.label("稍后再接：新建、照片取色、色码导入导出和 AI 接入会放在这里。");
+        });
     }
 
     pub fn settings_ui(&mut self,ctx:&egui::Context,autostart:bool){
@@ -1392,6 +1462,7 @@ impl App {
                         4=>egui::include_image!("../assets/settings-icons/system/tasks.svg"),
                         7=>egui::include_image!("../assets/settings-icons/system/notifications.svg"),
                         13=>egui::include_image!("../assets/settings-icons/system/weather.svg"),
+                        15=>egui::include_image!("../assets/settings-icons/system/deskpet.svg"),
                         _=>egui::include_image!("../assets/settings-icons/system/about.svg"),
                     };
                     let icon_bg=egui::Rect::from_center_size(egui::pos2(rect.left()+21.0,rect.center().y),egui::vec2(25.0,25.0));
@@ -1422,7 +1493,7 @@ impl App {
                     }
                 }
                 ui.visuals_mut().selection.bg_fill=settings_color(ctx,Color32::from_rgb(45,105,165),Color32::from_rgb(209,226,248));
-                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话"];
+                let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话","桌宠"];
                 if let Some(step)=self.wizard_step { self.settings_tab=[0,11,1,6][step as usize % 4]; }
                 ui.label(egui::RichText::new(titles[self.settings_tab.min(titles.len()-1)]).size(18.0).strong().color(settings_color(ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
                 if let Some((_,start,end))=SETTINGS_GROUPS.iter().find(|(_,start,end)|(*start..=*end).contains(&self.settings_tab)) {
@@ -1473,6 +1544,7 @@ impl App {
                         if !self.module_on(page) {ui.disable();}
                     }
                     match self.settings_tab {
+                    15=>self.desk_pet_settings(ui),
                     14=>self.session_settings(ui),
                     13=>self.weather_settings(ui),
                     12=>self.quota_settings(ui),

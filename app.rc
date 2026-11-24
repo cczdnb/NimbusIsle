@@ -1,8 +1,8 @@
 #pragma code_page(65001)
 1 ICON "assets/yunyu.ico"
 1 VERSIONINFO
- FILEVERSION 0,0,8,0
- PRODUCTVERSION 0,0,8,0
+ FILEVERSION 0,0,9,0
+ PRODUCTVERSION 0,0,9,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -17,8 +17,8 @@ BEGIN
             VALUE "InternalName", "Yunyu"
             VALUE "OriginalFilename", "yunyu.exe"
             VALUE "ProductName", "云屿"
-            VALUE "ProductVersion", "0.0.8"
-            VALUE "FileVersion", "0.0.8"
+            VALUE "ProductVersion", "0.0.9"
+            VALUE "FileVersion", "0.0.9"
         END
     END
     BLOCK "VarFileInfo"

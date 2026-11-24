@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body, #host { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; user-select: none; }
+#host canvas { display: block; width: 100%; height: 100%; outline: none; }
+.zzz {
+  position: fixed; z-index: 12; display: none; pointer-events: none;
+  transform: translate(-50%, -50%); color: #f7e6a8; font-weight: 800;
+  letter-spacing: 1px; text-shadow: 0 2px 0 rgba(30, 24, 10, 0.22);
+}
+.chip {
+  position: fixed; z-index: 14; pointer-events: none;
+  transform: translate(-50%, -50%); padding: 2px 7px;
+  border: 1px solid rgba(20, 20, 18, 0.12); border-radius: 7px;
+  background: #fffdf6; color: #22211d; font: 700 12px "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14);
+}
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script src="three.min.js"></script>
+<script src="7paws.js"></script>
+<script src="host.js"></script>
+</body>
+</html>

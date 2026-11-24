@@ -2038,6 +2038,8 @@ impl App {
     /// 0 = 药丸，1 = 完整面板（展开时可略超过 1）。
     #[cfg(test)]
     pub(crate) fn current_width(&self) -> f32 { self.w.pos+self.notice_width.pos }
+    /// 收起岛体当前的宽高（含动画中的中间值），给岛外桌宠对齐用。
+    pub fn pill_size(&self) -> (f32, f32) { (self.w.pos, self.h.pos) }
     #[cfg(test)]
     pub(crate) fn current_height(&self) -> f32 { self.h.pos }
 

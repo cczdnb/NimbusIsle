@@ -36,11 +36,14 @@ pub fn connect(config: &mut Config, alias: &str) -> Result<(), String> {
 pub fn fetch(agent: &ureq::Agent, account: &Account) -> Result<Snapshot, (String, u64)> {
     let session = read_session(&account.source).map_err(|error| (format!("读取登录：{error}"), 60))?;
     if session.token.is_empty() { return Err(("读取登录：库里没有 accessToken".into(), 0)); }
-    let primary = usage_rpc(agent, &session.token);
+    // TUN 打开时，Windows 仍可能留着 127.0.0.1 的 HTTP 代理。那个端口经常不听，或者和虚拟网卡绕圈。
+    // 代理这条连不上就改直连，流量仍由 TUN 转发；没配代理时本来就是直连，不再重试。
+    let direct = configured_proxy().then(direct_agent);
+    let primary = with_direct_fallback(agent, direct.as_ref(), |client| usage_rpc(client, &session.token));
     if let Ok(value) = &primary {
         if let Ok(snapshot) = parse(&with_plan(value.clone(), session.plan.as_deref())) { return Ok(snapshot); }
     }
-    let summary = usage_summary(agent, &session);
+    let summary = with_direct_fallback(agent, direct.as_ref(), |client| usage_summary(client, &session));
     if let Ok(snapshot) = summary { return Ok(snapshot); }
     let first = match &primary {
         Ok(value) => format!("用量接口：{}", parse(&with_plan(value.clone(), session.plan.as_deref())).unwrap_err()),
@@ -64,7 +67,7 @@ fn usage_rpc(agent: &ureq::Agent, token: &str) -> Result<Value, (String, u64)> {
             }
             ureq::Error::Status(429, response) => ("用量接口 HTTP 429：请求过于频繁，稍后自动重试".into(), response.header("Retry-After").and_then(|value| value.parse().ok()).unwrap_or(180).clamp(30, 3600)),
             ureq::Error::Status(code, response) => (format!("用量接口 HTTP {code}{}", brief_error(&response_text(response))), 60),
-            _ => ("用量接口：连不上 api2.cursor.sh".into(), 30),
+            ureq::Error::Transport(transport) => (format!("用量接口：连不上 api2.cursor.sh{}", transport_note(&transport)), 30),
         })?;
     read_json(response).map_err(|error| (format!("用量接口：{error}"), 60))
 }
@@ -76,10 +79,45 @@ fn usage_summary(agent: &ureq::Agent, session: &Session) -> Result<Snapshot, (St
     };
     let response = agent.get(SUMMARY_URL).set("Accept", "application/json").set("Cookie", &cookie).call().map_err(|error| match error {
         ureq::Error::Status(code, response) => (format!("用量摘要 HTTP {code}{}", brief_error(&response_text(response))), 60),
-        _ => ("用量摘要：连不上 cursor.com".into(), 30),
+        ureq::Error::Transport(transport) => (format!("用量摘要：连不上 cursor.com{}", transport_note(&transport)), 30),
     })?;
     let value = read_json(response).map_err(|error| (format!("用量摘要：{error}"), 60))?;
     parse(&with_plan(value, session.plan.as_deref())).map_err(|error| (format!("用量摘要：{error}"), 60))
+}
+
+fn with_direct_fallback<T>(agent: &ureq::Agent, direct: Option<&ureq::Agent>, mut call: impl FnMut(&ureq::Agent) -> Result<T, (String, u64)>) -> Result<T, (String, u64)> {
+    match call(agent) {
+        Ok(value) => Ok(value),
+        Err((message, _)) if direct.is_some() && message.contains("连不上") => match call(direct.unwrap()) {
+            Ok(value) => Ok(value),
+            Err((again, wait)) => Err((format!("{message}；直连：{again}"), wait)),
+        },
+        Err(error) => Err(error),
+    }
+}
+
+fn configured_proxy() -> bool {
+    ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"]
+        .iter()
+        .any(|key| std::env::var(key).ok().is_some_and(|value| !value.trim().is_empty()))
+        || super::system_proxy().is_some()
+}
+
+fn direct_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new().try_proxy_from_env(false).timeout(std::time::Duration::from_secs(12)).timeout_connect(std::time::Duration::from_secs(8)).redirects(0).build()
+}
+
+fn transport_note(transport: &ureq::Transport) -> String {
+    let kind = match transport.kind() {
+        ureq::ErrorKind::Dns => "域名没有解析出来",
+        ureq::ErrorKind::ConnectionFailed => "连接被拒绝或超时",
+        ureq::ErrorKind::ProxyConnect => "系统代理没连上",
+        ureq::ErrorKind::ProxyUnauthorized => "系统代理要求登录",
+        ureq::ErrorKind::InvalidProxyUrl => "系统代理地址无效",
+        ureq::ErrorKind::Io => "网络中断",
+        _ => "网络失败",
+    };
+    format!("（{kind}）")
 }
 
 fn read_json(response: ureq::Response) -> Result<Value, String> {
@@ -467,5 +505,32 @@ mod tests {
         assert_eq!(snapshot.plan, "Pro");
         assert_eq!(snapshot.windows[0].remaining, 0.0);
         assert_eq!(snapshot.windows[1].remaining, 100.0);
+    }
+
+    #[test]
+    fn a_failed_proxy_connection_retries_directly() {
+        let agent = ureq::AgentBuilder::new().redirects(0).middleware(|_: ureq::Request, _: ureq::MiddlewareNext| {
+            Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "proxy down").into())
+        }).build();
+        let direct = ureq::AgentBuilder::new().redirects(0).middleware(|request: ureq::Request, _: ureq::MiddlewareNext| {
+            assert_eq!(request.header("Authorization"), Some("Bearer synthetic-token"));
+            ureq::Response::new(200, "OK", r#"{"membershipType":"pro","planUsage":{"autoPercentUsed":12}}"#)
+        }).build();
+        let value = super::with_direct_fallback(&agent, Some(&direct), |client| super::usage_rpc(client, "synthetic-token")).unwrap();
+        let snapshot = parse(&value).unwrap();
+        assert_eq!(snapshot.windows[0].label, "Cursor 模型");
+        assert!((snapshot.windows[0].remaining - 88.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_http_rejection_does_not_retry_directly() {
+        let agent = ureq::AgentBuilder::new().redirects(0).middleware(|_: ureq::Request, _: ureq::MiddlewareNext| {
+            ureq::Response::new(401, "Unauthorized", "{}")
+        }).build();
+        let direct = ureq::AgentBuilder::new().redirects(0).middleware(|_: ureq::Request, _: ureq::MiddlewareNext| {
+            panic!("HTTP 401 不应改走直连");
+        }).build();
+        let (message, _) = super::with_direct_fallback(&agent, Some(&direct), |client| super::usage_rpc(client, "synthetic-token")).unwrap_err();
+        assert!(message.contains("HTTP 401") && !message.contains("直连"), "{message}");
     }
 }

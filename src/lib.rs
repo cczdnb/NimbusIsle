@@ -59,6 +59,7 @@ pub mod agent_session;
 mod session_ui;
 mod pet;
 mod pet_expressions;
+pub mod desk_pet;
 mod bar_layout;
 mod resident_settings;
 mod avoidance;

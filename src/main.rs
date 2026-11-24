@@ -680,6 +680,20 @@ impl eframe::App for Shell {
             }
             native.set_page_scroll_area(out.page_scroll_area.filter(|_|!self.hidden && out.expanded),ctx.pixels_per_point());
             native.update(region, hit, if self.hidden{None}else{out.notice_hit.map(r)},if self.hidden{None}else{out.file_drop_zone.map(r)},if self.hidden{None}else{out.glass.as_deref()},ctx.pixels_per_point(), out.editing, !self.hidden && out.expanded);
+            let show=self.app.settings.desk_pet.enabled && self.placed && !self.hidden && !self.covering && !self.app.offwork_cover() && !yunyu::hotkeys::hidden();
+            let monitor=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|display| yunyu::desk_pet::Px{left:display.bounds.left,top:display.bounds.top,right:display.bounds.right,bottom:display.bounds.bottom});
+            let hwnd=native.hwnd();
+            let mut rect=windows::Win32::Foundation::RECT::default();
+            let origin=unsafe{windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd,&mut rect).ok()}.map(|_| (rect.left,rect.top,hwnd.0 as isize));
+            let anchor=origin.zip(monitor).map(|((x,y,island),monitor)| yunyu::desk_pet::Anchor{
+                origin:(x,y), ppp:ctx.pixels_per_point(), dock:self.app.settings.dock,
+                canvas:if self.app.settings.dock.is_side(){(yunyu::side_dock::SIDE_W,yunyu::side_dock::SIDE_H)}else{(app::WIN_W,app::WIN_H)},
+                pill:self.app.pill_size(),
+                edge_gap:if self.app.settings.island_shape==yunyu::model::IslandShape::Pill{app::PILL_GAP}else{0.0},
+                monitor, island, show,
+            });
+            if yunyu::desk_pet::sync(&mut self.app.settings.desk_pet, anchor.as_ref()) { self.app.settings.save(); }
+            if show { ctx.request_repaint_after(Duration::from_millis(33)); }
             if !self.hidden && self.app.settings.avoids_top_bar() && self.app.settings.top_bar_on_top && !self.app.settings.dock.is_side() {
                 if let Some(display)=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id) {
                     native.keep_above_top_bar(display.bounds);

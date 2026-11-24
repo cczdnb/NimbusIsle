@@ -9956,10 +9956,25 @@ fn background_services_follow_the_module_switch(){
 
 #[test]
 fn every_module_settings_tab_maps_to_its_page(){
-    let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话"];
+    let titles=["常规","音乐与歌词","专注","健康提醒","待办","置物","第三方","通知","邮箱","日程","关于","页面管理","AI 额度","天气","会话","桌宠"];
     let mut pages:Vec<_>=(0..titles.len()).filter_map(crate::extras::settings_tab_module).collect();
     for tab in 0..titles.len() {
         if let Some(page)=crate::extras::settings_tab_module(tab) {assert!(crate::app::PAGE_NAMES[page].chars().next()==titles[tab].chars().next(),"{} ↔ {}",titles[tab],crate::app::PAGE_NAMES[page]);}
     }
     pages.sort();assert_eq!(pages,(0..crate::app::PAGE_NAMES.len()).collect::<Vec<_>>(),"每个功能页面各有一个设置分页");
+}
+
+#[test]
+fn desk_pet_page_keeps_its_switch_separate_from_the_island_mascot(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    assert!(h.app.settings.pet && !h.app.settings.desk_pet.enabled,"岛上吉祥物默认开着，桌宠默认关着");
+    let _=h.ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,egui::vec2(520.0,900.0))),..Default::default()},|ctx|{
+        egui::CentralPanel::default().show(ctx,|ui|h.app.desk_pet_settings(ui));
+    });
+    h.app.settings.desk_pet.enabled=true;
+    h.app.settings.save();
+    let loaded=crate::model::Settings::load();
+    assert!(loaded.desk_pet.enabled && loaded.pet,"桌宠开关不应关掉岛上吉祥物");
+    assert_eq!((loaded.desk_pet.scale, loaded.desk_pet.opacity, loaded.desk_pet.coat.as_str()), (40, 100, "tuxedo"));
 }

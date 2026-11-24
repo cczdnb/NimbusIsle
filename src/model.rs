@@ -395,11 +395,13 @@ pub struct Settings {
     pub session_keep_mins: u32,
     /// 会话读取器开关，每一位对应 `agent_session::Source`。
     pub session_sources: u8,
+    /// 岛外桌宠。关掉时不创建窗口。
+    pub desk_pet: crate::desk_pet::Prefs,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9,10], show_clock: true, show_battery: true, show_weather: true, weather_scene: true, show_cpu: false, show_mem: false, offwork: false, offwork_start: 9 * 60, offwork_end: 18 * 60, offwork_weekdays: true, offwork_soon: 30, offwork_own_faces: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false, session_keep_mins: 10, session_sources: crate::agent_session::Source::ALL_BITS }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_width: ISLAND_WIDTH_DEFAULT, island_offset: 0, oled_shift: false, dock: Dock::Top, settings_theme: Default::default(), pet: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; PAGE_COUNT], page_order: [0,1,2,3,4,5,6,7,8,9,10], show_clock: true, show_battery: true, show_weather: true, weather_scene: true, show_cpu: false, show_mem: false, offwork: false, offwork_start: 9 * 60, offwork_end: 18 * 60, offwork_weekdays: true, offwork_soon: 30, offwork_own_faces: false, notification_dwell_secs: 4.5, clock_12h: false, clock_period: 0, clock_seconds: false, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wecom_notifications:false, feishu_notifications:false, dingtalk_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, lyric_translation:true, lyric_align:LyricAlign::Center, lyric_anim:LyricAnim::Scan, spectrum_enabled:true, spectrum_style:SpectrumStyle::Bars, lyric_progress:true, lyric_font_size:12.0, lyric_multiline:false, cover_tint:false, lyric_player_delays:Vec::new(),hotkeys:[String::new(),String::new(),String::new(),String::new(),String::new(),String::new()], hide_fullscreen: true, avoid_top_bar: true, top_bar_on_top: false, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, sit_remind: true, sit_minutes: 60, lunch_rest: true, lunch_start: 720, lunch_end: 810, mail_enabled: true, mail_sync_operations:false, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, weather_city: String::new(), weather_position: None, weather_saved: Vec::new(), render_compat: false, render_compat_reason: String::new(), first_run_done: false, session_keep_mins: 10, session_sources: crate::agent_session::Source::ALL_BITS, desk_pet: crate::desk_pet::Prefs::default() }
     }
 }
 
@@ -602,10 +604,11 @@ impl Settings {
                 "first_run_done" => { saw_first_run = true; s.first_run_done = v == "1"; }
                 "session_keep_mins" => s.session_keep_mins = v.parse::<u32>().unwrap_or(10).clamp(1, 60),
                 "session_sources" => s.session_sources = v.parse::<u8>().unwrap_or(crate::agent_session::Source::ALL_BITS) & crate::agent_session::Source::ALL_BITS,
-                _ => {}
+                _ => { let _ = s.desk_pet.apply_kv(&k, &v); }
             }
         }
         if file_existed && !saw_first_run { s.first_run_done = true; }
+        s.desk_pet.normalize();
         if !s.visible_pages.contains(&true) { s.visible_pages[0]=true; }
         // 旧版只有一个指定城市：迁移进已保存列表，升级后下拉框里能直接看到它。
         if let Some(position)=s.weather_position.clone().filter(|p|p.label==s.weather_city) {
@@ -711,6 +714,23 @@ impl Settings {
                 ("first_run_done".into(), (self.first_run_done as u8).to_string()),
                 ("session_keep_mins".into(), self.session_keep_mins.clamp(1, 60).to_string()),
                 ("session_sources".into(), (self.session_sources & crate::agent_session::Source::ALL_BITS).to_string()),
+                ("desk_pet".into(), u8::from(self.desk_pet.enabled).to_string()),
+                ("desk_pet_free".into(), u8::from(self.desk_pet.free).to_string()),
+                ("desk_pet_scale".into(), crate::desk_pet::snap_percent(self.desk_pet.scale).to_string()),
+                ("desk_pet_opacity".into(), self.desk_pet.opacity.clamp(10, 100).to_string()),
+                ("desk_pet_coat".into(), crate::desk_pet::normalize_coat(&self.desk_pet.coat).to_string()),
+                ("desk_pet_layout".into(), if self.desk_pet.layout_104 { "104".into() } else { "65".into() }),
+                ("desk_pet_labels".into(), u8::from(self.desk_pet.labels).to_string()),
+                ("desk_pet_privacy".into(), u8::from(self.desk_pet.privacy).to_string()),
+                ("desk_pet_left_mouse".into(), u8::from(self.desk_pet.left_mouse).to_string()),
+                ("desk_pet_sleep".into(), u8::from(self.desk_pet.sleep).to_string()),
+                ("desk_pet_sleep_mins".into(), self.desk_pet.sleep_mins.clamp(1, 120).to_string()),
+                ("desk_pet_purr".into(), u8::from(self.desk_pet.purr).to_string()),
+                ("desk_pet_purr_sleep".into(), u8::from(self.desk_pet.purr_sleep).to_string()),
+                ("desk_pet_annoy".into(), u8::from(self.desk_pet.annoy).to_string()),
+                ("desk_pet_click_through".into(), u8::from(self.desk_pet.click_through).to_string()),
+                ("desk_pet_x".into(), self.desk_pet.x.map(|value| value.to_string()).unwrap_or_default()),
+                ("desk_pet_y".into(), self.desk_pet.y.map(|value| value.to_string()).unwrap_or_default()),
             ],
         );
     }
