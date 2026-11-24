@@ -2009,11 +2009,12 @@ impl App {
             let (width, height) = self.nudge_size();
             return (width + self.pet_space(), height);
         }
-        if !self.compact_notices()&&!self.open {
-            if let Some(a)=&self.notice {let (width,height)=self.notice_size(a);return (width+self.pet_space(),height);}
-        }
+        // 读秒卡片独占这块宽度，右侧提醒先不要挤进来。
         if !self.open && !self.side() {
             if let Some(size)=self.offwork_finale_size() {return size;}
+        }
+        if !self.compact_notices()&&!self.open {
+            if let Some(a)=&self.notice {let (width,height)=self.notice_size(a);return (width+self.pet_space(),height);}
         }
         if self.side() {
             // 左右停靠：竖向胶囊（通知仍是贴边滑出的横向卡片，见上）。
@@ -2088,6 +2089,11 @@ impl App {
         }
         self.browser_minimal_active=browser_minimal;
         self.advance_offwork_finale(&ctx);
+        self.hold_notices_for_countdown();
+        if self.offwork_cover() {
+            ctx.request_repaint();
+            return self.paint_offwork_cover(ui);
+        }
         if !self.started {
             self.started = true;
             self.last_input = env.t;
@@ -2106,7 +2112,7 @@ impl App {
         if let Some(a)=&hud_active {self.hud_notice=Some(a.clone());}
         self.hud_alpha=anim::approach(self.hud_alpha,if hud_active.is_some(){1.0}else{0.0},if hud_active.is_some(){16.0}else{8.0},dt);
         if hud_active.is_none() && self.hud_alpha<0.003 {self.hud_notice=None;}
-        let notice_target=if !self.notice.as_ref().is_some_and(|a|a.messenger().is_some()) && self.compact_notices()&&(self.notice.is_some()||self.t<self.notification_bell_until) {44.0}else{0.0};
+        let notice_target=if self.offwork_finale_showing() {0.0} else if !self.notice.as_ref().is_some_and(|a|a.messenger().is_some()) && self.compact_notices()&&(self.notice.is_some()||self.t<self.notification_bell_until) {44.0}else{0.0};
         self.notice_width.target=notice_target;
         if self.compact_notices(){self.notice_width.step(dt);}else{self.notice_width.snap(0.0);self.notice_details=false;}
         self.update_media(env,&ctx);
@@ -2276,13 +2282,14 @@ impl App {
         let (max_w, max_h) = if side {(crate::side_dock::SIDE_W, crate::side_dock::SIDE_H)} else {(WIN_W, WIN_H)};
         let (w, h) = ((self.w.pos * sx).min((max_w - 24.0).max(self.w.pos)), (self.h.pos * sy).min((max_h - 24.0).max(self.h.pos)));
         let panel = self.island_rect(win, w, h);
-        let messenger_rect=self.messenger_badge_rect(win,panel);
+        let countdown_card=self.offwork_finale_showing();
+        let messenger_rect=if countdown_card {None} else {self.messenger_badge_rect(win,panel)};
         let appear=self.messenger_appear();
         let outside_badge=messenger_rect.filter(|_|appear>0.02);
         let pc = anim::clamp01(p);
         let painter = ui.painter_at(ui.max_rect().expand(40.0));
         let feather = 1.0 / ctx.pixels_per_point();
-        let notice_rect=self.notice_rect(cx,top);
+        let notice_rect=if countdown_card {None} else {self.notice_rect(cx,top)};
         let notice_shape=notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max));
         let body=messenger_rect.filter(|_|outside_badge.is_none()).map_or(panel,|badge|panel.union(badge));
         self.playing_extra_left=0.0;
@@ -2294,7 +2301,7 @@ impl App {
             }
         }
         let body=notice_shape.map_or(body,|notice|body.union(notice));
-        let minimal_strip = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until;
+        let minimal_strip = self.effective_minimal() && !self.offwork_finale_showing() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until;
         let minimal_pill = minimal_strip && pc < 0.02;
         let flare = if minimal_pill || pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
@@ -2373,10 +2380,10 @@ impl App {
         let base = Card::new(ui, origin, clip);
         self.cursor_local = env.cursor.map(|p| base.to_local(p));
 
-        let nudge_banner=!self.open && self.nudge_active();
-        let banner=!self.compact_notices()&&self.notice.is_some()&&!self.open && !nudge_banner;
+        let nudge_banner=!countdown_card && !self.open && self.nudge_active();
+        let banner=!countdown_card && !self.compact_notices()&&self.notice.is_some()&&!self.open && !nudge_banner;
         let restoring_lyrics=!self.open&&self.notice.is_none()&&!nudge_banner&&self.island_lyrics_active()&&self.hud_notice.as_ref().is_some_and(|a|a.meeting.is_some()||a.source!=crate::extras::AlertSource::Internal);
-        let fading_hud=!nudge_banner&&!self.compact_notices()&&!self.open&&self.hud_notice.as_ref().is_some_and(|a|a.is_hud())&&(banner||self.hud_alpha>0.003);
+        let fading_hud=!countdown_card&&!nudge_banner&&!self.compact_notices()&&!self.open&&self.hud_notice.as_ref().is_some_and(|a|a.is_hud())&&(banner||self.hud_alpha>0.003);
         if fading_hud {
             let from=self.resident.target.width;let to=HUD_W+self.pet_space();
             let width_progress=if (to-from).abs()<1.0 {if banner{1.0}else{0.0}}else{((self.w.pos-from)/(to-from)).clamp(0.0,1.0)};
@@ -2429,7 +2436,7 @@ impl App {
             }
             keep_colors.push((from,crate::skin_paint::shape_count(&ctx,layer)));
         }
-        let notice_details=self.notice_details_rect(cx,top);
+        let notice_details=if countdown_card {None} else {self.notice_details_rect(cx,top)};
         if let Some(rect)=notice_details {
             let radius=if self.hud_notice.as_ref().is_some_and(|a|a.meeting.is_some()){14.0}else{10.0};
             let from=crate::skin_paint::shape_count(&ctx,layer);
@@ -2665,12 +2672,24 @@ impl App {
         32.0+unread_step(horizontal)*(icons-1.0)+end
     }
 
+    /// 提醒画在岛外面。布局用的 `win` 只有左侧 640，画布右边还有 320 专门留给这些图标。
+    /// 右边界用整块画布和屏幕的交集，不要用 640 那条假边，否则岛一变宽就把整排提醒甩到左边。
+    fn notice_bounds(&self, win: Rect) -> Rect {
+        if self.side() { return self.screen.map_or(win, |screen| screen.intersect(win)); }
+        let Some(screen) = self.screen else { return win; };
+        let canvas_right = win.left() + CANVAS_W;
+        Rect::from_min_max(
+            Pos2::new(screen.left().max(win.left()), screen.top().max(win.top())),
+            Pos2::new(screen.right().min(canvas_right), screen.bottom().min(win.bottom())),
+        )
+    }
+
     fn messenger_badge_rect(&self,win:Rect,panel:Rect)->Option<Rect>{
         if self.unread_count()==0 || self.browser_minimal_active && !self.open {return None;}
         // 完整横幅已包含该来源图标。歌词模式和横幅收起后使用常驻入口。
         if !self.open && !self.compact_notices() && self.pending_messengers.len()==1 && self.health_badges().is_empty() && !self.session_mark_visible()
             && self.notice.as_ref().and_then(|a|a.messenger())==self.pending_messengers.first().map(|u|u.source){return None;}
-        let bounds=self.screen.map_or(win,|screen|screen.intersect(win));
+        let bounds=self.notice_bounds(win);
         let appear=self.messenger_appear();
         if appear>0.02 {
             // 展开：贴在面板外侧、顶端对齐的竖向胶囊；顶部停靠和左停靠在右边，右停靠在左边。

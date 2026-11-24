@@ -31,6 +31,8 @@ struct Shell {
     /// 刚点过播放控制或音量时，短时间内按最快频率采样，让按钮状态及时回显。
     media_fast_until: Option<Instant>,
     placed: bool,
+    /// 下班最后 5 秒和随后的黑屏正在铺满显示器。
+    covering: bool,
     placement_at: PollClock,
     placement_scale: f32,
     /// 上次定位时的目标屏幕、水平位置与 OLED 像素偏移；变化后立即重新定位，不等下一次轮询。
@@ -192,6 +194,7 @@ impl Shell {
             media_enabled,
             media_fast_until: None,
             placed: false,
+            covering: false,
             placement_at: PollClock::default(),
             placement_scale: 0.0,
             placement_key: (String::new(), 0, yunyu::model::Dock::Top, true, (0, 0)),
@@ -402,7 +405,23 @@ impl eframe::App for Shell {
         #[cfg(windows)]
         let placement_key=(self.app.settings.display_id.clone(),(offset*10000.0).round() as i32,self.app.settings.dock,self.app.settings.avoids_top_bar(),shift);
         #[cfg(windows)]
-        if !self.placed || self.placement_scale!=ctx.pixels_per_point() || self.placement_key!=placement_key || self.placement_at.ready(Duration::from_secs(1)) {
+        {
+            let cover=self.app.offwork_cover();
+            if cover {
+                if self.app.displays.is_empty() { self.app.displays=yunyu::display_layout::connected(); }
+                let display=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
+                if let Some(bounds)=display.map(|d|d.bounds) {
+                    if let Some(window)=self.native.as_mut() { let _=window.cover_display(bounds); }
+                }
+                self.covering=true;
+                ctx.request_repaint();
+            } else if self.covering {
+                self.covering=false;
+                self.placed=false;
+            }
+        }
+        #[cfg(windows)]
+        if !self.app.offwork_cover() && (!self.placed || self.placement_scale!=ctx.pixels_per_point() || self.placement_key!=placement_key || self.placement_at.ready(Duration::from_secs(1))) {
             // 只有位置变化时沿用已知屏幕，避免拖动中每帧枚举显示器。
             let offset_only=self.placed && self.placement_scale==ctx.pixels_per_point() && !self.placement_at.ready(Duration::from_secs(1))
                 && (&self.placement_key.0,self.placement_key.2,self.placement_key.3,self.placement_key.4)==(&placement_key.0,placement_key.2,placement_key.3,placement_key.4);
@@ -617,7 +636,7 @@ impl eframe::App for Shell {
                     let target=yunyu::oled_shift::shift(true,self.app.settings.dock,self.t0.elapsed());
                     yunyu::oled_shift::toward(self.oled_shift,target)
                 } else {self.oled_shift};
-            if shift!=self.oled_shift {
+            if !self.covering && shift!=self.oled_shift {
                 self.oled_shift=shift;
                 let display=yunyu::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
                 if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(ctx.pixels_per_point(),yunyu::display_layout::placement_bounds(d,self.app.settings.avoids_top_bar()),self.app.placement_offset(),self.app.settings.dock,shift))) {
@@ -636,7 +655,7 @@ impl eframe::App for Shell {
                     i.events.iter().rev().find_map(|e|match e{egui::Event::Screenshot{image,..}=>Some(image.clone()),_=>None}),
                     i.events.iter().any(|e|!matches!(e,egui::Event::Screenshot{..})),
                 ));
-                let changed=shot.as_ref().is_some_and(|image|native.present_frame(image.size,image.as_raw()));
+                let changed=shot.as_ref().is_some_and(|image|native.present_frame(image.size,image.as_raw(),self.app.offwork_cover()));
                 let turning=out.page_transition && !self.hidden;
                 let interactive=other_input || turning;
                 if shot.is_none() || changed || interactive {
@@ -650,8 +669,15 @@ impl eframe::App for Shell {
             }
             let r = |r: egui::Rect| (r.left(), r.top(), r.width(), r.height());
             // 保留主窗口的事件循环，避免全屏隐藏后设置窗口无法关闭或重新打开。
-            let region=if self.hidden {(0.0,0.0,0.0,0.0)} else {r(out.region)};
-            let hit=if self.hidden || out.click_through && out.notice_hit.is_none() {(0.0,0.0,0.0,0.0)} else {r(out.hit)};
+            let cover=self.app.offwork_cover();
+            let mut region=if self.hidden && !cover {(0.0,0.0,0.0,0.0)} else {r(out.region)};
+            let mut hit=if self.hidden && !cover || out.click_through && out.notice_hit.is_none() {(0.0,0.0,0.0,0.0)} else {r(out.hit)};
+            if cover {
+                if let Some((w,h))=native.client_logical(ctx.pixels_per_point()) {
+                    region=(0.0,0.0,w,h);
+                    hit=region;
+                }
+            }
             native.set_page_scroll_area(out.page_scroll_area.filter(|_|!self.hidden && out.expanded),ctx.pixels_per_point());
             native.update(region, hit, if self.hidden{None}else{out.notice_hit.map(r)},if self.hidden{None}else{out.file_drop_zone.map(r)},if self.hidden{None}else{out.glass.as_deref()},ctx.pixels_per_point(), out.editing, !self.hidden && out.expanded);
             if !self.hidden && self.app.settings.avoids_top_bar() && self.app.settings.top_bar_on_top && !self.app.settings.dock.is_side() {

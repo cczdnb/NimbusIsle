@@ -541,6 +541,31 @@ impl Window {
         }
     }
 
+    /// 把窗口铺到整块显示器上。假关机只用这一下，不改变系统电源状态。
+    pub fn cover_display(&mut self, bounds: crate::display_layout::Bounds) -> bool {
+        let w = bounds.right - bounds.left;
+        let h = bounds.bottom - bounds.top;
+        if w < 1 || h < 1 {
+            return false;
+        }
+        unsafe {
+            let mut current = RECT::default();
+            if GetWindowRect(self.hwnd, &mut current).is_err() {
+                return false;
+            }
+            let same = current.left == bounds.left && current.top == bounds.top && current.right - current.left == w && current.bottom - current.top == h;
+            if !same {
+                let flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+                if SetWindowPos(self.hwnd, HWND_TOPMOST, bounds.left, bounds.top, w, h, flags).is_err() {
+                    return false;
+                }
+            }
+        }
+        self.region = (i32::MIN, 0, 0, 0);
+        self.glass = None;
+        true
+    }
+
     /// 系统背景模糊是否正在生效（毛玻璃皮肤据此选择着色深浅）。
     pub fn blur_active(&self)->bool {self.blur}
     pub fn opaque_surface(&self)->bool {self.opaque_surface}
@@ -548,10 +573,18 @@ impl Window {
     /// 是否需要每帧读回画面交给分层窗口（兼容后端，且分层窗口仍可用）。
     pub fn wants_frames(&self)->bool {self.opaque_surface && !matches!(self.layering,Layering::Unavailable)}
 
+    /// 窗口客户区的逻辑宽高。假关机时用来把命中区铺满，不跟上一帧的小岛尺寸。
+    pub fn client_logical(&self, ppp: f32) -> Option<(f32, f32)> {
+        if ppp <= 0.0 { return None; }
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(self.hwnd, &mut rect).ok()? };
+        Some((rect.right as f32 / ppp, rect.bottom as f32 / ppp))
+    }
+
     /// 交一帧读回的画面（RGBA，已预乘）。返回画面是否变化。
     /// 首帧看读回的画面有没有真正的透明像素：有就原样交给分层窗口；没有（部分 AMD 显卡的 OpenGL）
     /// 就按岛体轮廓补算边缘 alpha——普通模式也不再退回逐像素「有或没有」的轮廓裁剪。
-    pub fn present_frame(&mut self,size:[usize;2],rgba:&[u8])->bool {
+    pub fn present_frame(&mut self,size:[usize;2],rgba:&[u8],cover:bool)->bool {
         if !self.wants_frames(){return false;}
         if matches!(self.layering,Layering::Pending) {
             let real=crate::layered::has_real_alpha(size,rgba) && outline_test()!=Some(true);
@@ -571,7 +604,8 @@ impl Window {
             }
         }
         let Layering::Active(layered)=&mut self.layering else {return false};
-        let frame=if self.outline.active {self.outline.apply(size,rgba)} else {rgba};
+        // 假关机要整屏不透明。轮廓蒙版会把岛以外挖空，黑屏就只剩一块小岛。
+        let frame=if self.outline.active && !cover {self.outline.apply(size,rgba)} else {rgba};
         match layered.present(self.hwnd,size,frame) {
             // 切到分层窗口后，下一次 update 换回矩形区域（云屿窗口本身已几乎不可见，只负责命中）。
             Ok(changed)=>changed,
@@ -832,11 +866,11 @@ mod tests {
                 let shapes=[GlassShape::Outline(island)];
                 // 读回的画面：岛体黑色、画布也是黑色，alpha 全部 255——和 AMD OpenGL 读回的一样。
                 let opaque=[0u8,0,0,255].repeat(w*h);
-                assert!(!native.present_frame([w,h],&opaque),"还没收到轮廓时先保持轮廓裁剪");
+                assert!(!native.present_frame([w,h],&opaque,false),"还没收到轮廓时先保持轮廓裁剪");
                 assert!(matches!(native.layering,Layering::Pending));
                 native.update((0.0,0.0,w as f32,h as f32),(80.0,0.0,240.0,60.0),None,None,Some(&shapes),1.0,false,false);
                 assert!(native.wants_frames());
-                assert!(native.present_frame([w,h],&opaque),"读不到透明通道也要切到分层窗口");
+                assert!(native.present_frame([w,h],&opaque,false),"读不到透明通道也要切到分层窗口");
                 assert!(matches!(native.layering,Layering::Active(_)) && native.outline.active);
                 let frame=&native.outline.frame;
                 let alpha=|x:usize,y:usize|frame[(y*w+x)*4+3];
@@ -850,7 +884,7 @@ mod tests {
                 let region=CreateRectRgn(0,0,0,0);
                 if GetWindowRgn(hwnd,region).0!=0 {assert!(PtInRegion(region,10,150).as_bool(),"分层显示后窗口区域应回到矩形");}
                 let _=DeleteObject(region);
-                assert!(!native.present_frame([w,h],&opaque),"画面没变时不重复提交");
+                assert!(!native.present_frame([w,h],&opaque,false),"画面没变时不重复提交");
             }
             *hit().lock().unwrap_or_else(|e|e.into_inner())=saved;
             let _=DestroyWindow(hwnd);

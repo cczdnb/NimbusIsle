@@ -5466,6 +5466,35 @@ fn display_choice_saves_and_keeps_disconnected_selection(){
 }
 
 #[test]
+fn countdown_card_keeps_the_side_notice_until_the_seconds_finish(){
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    use chrono::Timelike;
+    let now=chrono::Local::now();
+    let end=now.hour()*60+now.minute()+1;
+    if end>=24*60 {return;}
+    let mut h=H::new();
+    h.app.settings.offwork=true;
+    h.app.settings.offwork_weekdays=false;
+    h.app.settings.offwork_start=0;
+    h.app.settings.offwork_end=end as u32;
+    h.app.settings.pet=false;
+    h.app.settings.notifications=true;
+    h.app.settings.read_notifications=true;
+    h.app.settings.notification_preview=true;
+    for _ in 0..20 {h.frame(vec![]);}
+    h.app.receive_notification("测试消息".into(),"notice.test".into(),"下午一起开会".into());
+    h.frame(vec![]);
+    let started=h.app.notice.as_ref().map(|a|a.at).expect("提醒应先排上");
+    for _ in 0..30 {h.frame(vec![]);}
+    assert!(h.app.notice.is_some(),"读秒期间提醒要留着");
+    assert!(h.app.notice.as_ref().unwrap().at>=started,"读秒期间不计提醒的停留时间");
+    assert!(!h.shapes.iter().any(|s|matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="下午一起开会")),"读秒时不画右侧提醒");
+    if h.app.offwork_finale_showing() {
+        assert!((h.app.current_width()-240.0).abs()<8.0,"读秒卡片不被提醒撑宽，实际 {}",h.app.current_width());
+    }
+}
+
+#[test]
 fn closing_app_notification_clears_its_bell_and_keeps_queued_messages(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     for lyrics in [false,true]{
@@ -8852,6 +8881,28 @@ fn messenger_accounts_get_number_tags_and_clear_one_by_one(){
     for _ in 0..10{h.wheel(-40.0);}
     h.frame(vec![]);
     assert!(last(&h).height()>20.0 && last(&h).bottom()<=panel.bottom(),"滚动后露出第四个 {:?}",last(&h));
+}
+
+#[test]
+fn wide_island_keeps_collapsed_reminders_on_the_right(){
+    let _guard=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.settings.island_width=608;
+    h.app.settings.wechat_notifications=true;
+    h.frame(vec![]);
+    h.app.receive_wechat_reminder();
+    let screen=Rect::from_min_size(Pos2::ZERO,Vec2::new(crate::app::CANVAS_W,WIN_H));
+    for _ in 0..360 {
+        h.t+=1.0/60.0;
+        let env=Env{t:h.t,screen:Some(screen),..Default::default()};
+        let raw=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(crate::app::CANVAS_W,WIN_H))),time:Some(h.t),focused:true,..Default::default()};
+        h.shapes=h.ctx.run(raw,|ctx|{egui::CentralPanel::default().frame(egui::Frame::new()).show(ctx,|ui|{
+            h.app.frame(ui,Rect::from_min_size(ui.max_rect().min,Vec2::new(WIN_W,WIN_H)),&env);
+        });}).shapes;
+    }
+    let badge=h.ctx.read_response(egui::Id::new(("card",true,"微信"))).unwrap().rect;
+    assert!(badge.left()>WIN_W/2.0,"岛变宽后提醒仍应在右侧，不应甩到左边 {:?}",badge);
+    assert!(badge.right()<=crate::app::CANVAS_W+0.5,"提醒应留在右侧预留的画布里 {:?}",badge);
 }
 
 #[test]

@@ -240,13 +240,23 @@ fn tone_color(tone: Tone) -> Color32 {
     }
 }
 
-const FINALE_HOLD: f64 = 4.0;
+const BLACK_HOLD: f64 = 5.0;
+
+fn escape_held() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
+        return unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) < 0 };
+    }
+    #[cfg(not(windows))]
+    false
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Finale {
     Idle,
     Seconds,
-    Go { until: f64 },
+    Black { until: f64 },
     Done,
 }
 
@@ -259,7 +269,10 @@ pub(crate) enum FinaleCaption {
     #[default]
     None,
     Seconds(i64),
-    Go,
+    /// 最后 5 秒，铺满屏幕的数字。
+    Flash(i64),
+    /// 假关机：整屏黑色。
+    Black,
 }
 
 #[derive(Default)]
@@ -451,9 +464,10 @@ impl crate::app::App {
             self.offwork.caption = FinaleCaption::None;
             return;
         }
+        // 自动避让把岛收成细线时，最后这段倒计时通知仍要拉开。极简刘海继续让开。
+        // 右侧提醒不打断读秒，先留着，卡片结束再出现。
         let visible = !self.open && !self.side() && !self.nudge_active()
-            && !(self.notice.is_some() && !self.compact_notices())
-            && !self.effective_minimal();
+            && !self.settings.minimal;
         let now = chrono::Local::now();
         let shown = phase(&now, &Rule::from_settings(&self.settings));
         let day = now.format("%Y-%m-%d").to_string();
@@ -467,7 +481,17 @@ impl crate::app::App {
     }
 
     pub(crate) fn offwork_finale_showing(&self) -> bool {
-        self.offwork.caption != FinaleCaption::None
+        matches!(self.offwork.caption, FinaleCaption::Seconds(_))
+    }
+
+    pub fn offwork_cover(&self) -> bool {
+        matches!(self.offwork.caption, FinaleCaption::Flash(_) | FinaleCaption::Black)
+    }
+
+    fn dismiss_offwork_cover(&mut self) {
+        self.offwork.finale = Finale::Done;
+        self.offwork.caption = FinaleCaption::None;
+        self.offwork.face_showing = false;
     }
 
     pub(crate) fn offwork_finale_size(&self) -> Option<(f32, f32)> {
@@ -475,11 +499,8 @@ impl crate::app::App {
     }
 
     pub(crate) fn paint_offwork_finale(&self, ui: &eframe::egui::Ui, painter: &eframe::egui::Painter, panel: eframe::egui::Rect, flare: f32, flare_h: f32, radius: f32, feather: f32) {
-        let label = match self.offwork.caption {
-            FinaleCaption::Seconds(remain) => remain.to_string(),
-            FinaleCaption::Go => "GOGOGO".to_string(),
-            FinaleCaption::None => return,
-        };
+        let FinaleCaption::Seconds(remain) = self.offwork.caption else { return };
+        let label = remain.to_string();
         crate::shape::fill(painter, panel, flare, flare_h, radius, Color32::WHITE, feather);
         let card = Card::new(ui, panel.min, panel);
         let texture = finale_texture(ui.ctx());
@@ -497,6 +518,43 @@ impl crate::app::App {
             theme::font(28.0, W::Bold),
             Color32::BLACK,
         );
+    }
+
+    pub(crate) fn paint_offwork_cover(&mut self, ui: &mut eframe::egui::Ui) -> crate::app::FrameOut {
+        let rect = ui.ctx().screen_rect();
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, Color32::BLACK);
+        if let FinaleCaption::Flash(second) = self.offwork.caption {
+            let size = (rect.height() * 0.42).clamp(96.0, 420.0);
+            painter.text(
+                rect.center(),
+                eframe::egui::Align2::CENTER_CENTER,
+                &second.to_string(),
+                theme::font(size, W::Bold),
+                Color32::WHITE,
+            );
+        } else if matches!(self.offwork.caption, FinaleCaption::Black) {
+            let armed = matches!(self.offwork.finale, Finale::Black { until } if self.t > until - BLACK_HOLD + 0.25);
+            let escape = ui.input(|input| input.key_pressed(eframe::egui::Key::Escape)) || escape_held();
+            if armed && (ui.input(|input| input.pointer.any_click()) || escape) {
+                self.dismiss_offwork_cover();
+            }
+        }
+        crate::app::FrameOut {
+            region: rect,
+            glass: None,
+            hit: rect,
+            notice_hit: None,
+            file_drop_zone: None,
+            expanded: false,
+            editing: false,
+            animating: true,
+            repaint_after: std::time::Duration::from_millis(16),
+            page_scroll_area: None,
+            click_through: false,
+            page_transition: false,
+            cmds: Vec::new(),
+        }
     }
 }
 
@@ -526,16 +584,21 @@ fn step_finale(mut state: Finale, stored_day: &str, day: &str, shown: &Phase, no
         Phase::Ready { .. } => Some(0),
         Phase::Hidden | Phase::Counting { .. } => None,
     };
+    // 下班时间改到更晚时，这一轮重新计。到点之后仍停在结束，不补播。
+    if matches!(state, Finale::Done | Finale::Black { .. }) && matches!(remain, Some(left) if left > 0) {
+        state = Finale::Idle;
+    }
     match (state, remain) {
         (Finale::Done, _) => (Finale::Done, FinaleCaption::None),
-        (Finale::Go { until }, _) if now >= until => (Finale::Done, FinaleCaption::None),
-        (Finale::Go { until }, _) => (Finale::Go { until }, if visible { FinaleCaption::Go } else { FinaleCaption::None }),
+        (Finale::Black { until }, _) if now >= until => (Finale::Done, FinaleCaption::None),
+        (Finale::Black { until }, _) => (Finale::Black { until }, if visible { FinaleCaption::Black } else { FinaleCaption::None }),
         (_, None) => (Finale::Idle, FinaleCaption::None),
         (_, Some(remain)) if remain > 60 => (Finale::Idle, FinaleCaption::None),
-        (Finale::Seconds, Some(0)) if visible => (Finale::Go { until: now + FINALE_HOLD }, FinaleCaption::Go),
+        (Finale::Seconds, Some(0)) if visible => (Finale::Black { until: now + BLACK_HOLD }, FinaleCaption::Black),
         (Finale::Seconds, Some(0)) => (Finale::Done, FinaleCaption::None),
         (_, Some(0)) => (Finale::Idle, FinaleCaption::None),
         (state, Some(_)) if !visible => (state, FinaleCaption::None),
+        (_, Some(remain)) if (1..=5).contains(&remain) => (Finale::Seconds, FinaleCaption::Flash(remain)),
         (_, Some(remain)) => (Finale::Seconds, FinaleCaption::Seconds(remain)),
     }
 }
@@ -912,18 +975,30 @@ mod tests {
     #[test]
     fn gogogo_holds_then_ends_once() {
         let ready = Phase::Ready { leave_at: 0 };
-        let (state, caption) = finale(Finale::Seconds, &ready, 10.0, true);
-        assert_eq!(caption, FinaleCaption::Go);
-        let Finale::Go { until } = state else { panic!("走到 0 应进入 GOGOGO") };
-        assert!((until - 14.0).abs() < 0.001);
+        let (state, caption) = finale(Finale::Idle, &counting(5), 0.0, true);
+        assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::Flash(5)), "最后 5 秒铺满屏幕");
+        let (state, caption) = finale(Finale::Idle, &counting(6), 0.0, true);
+        assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::Seconds(6)));
 
-        let (state, caption) = finale(Finale::Go { until }, &ready, 13.9, true);
-        assert_eq!((state, caption), (Finale::Go { until }, FinaleCaption::Go));
-        let (state, caption) = finale(Finale::Go { until }, &ready, 14.0, true);
+        let (state, caption) = finale(Finale::Seconds, &ready, 10.0, true);
+        assert_eq!(caption, FinaleCaption::Black);
+        let Finale::Black { until } = state else { panic!("走到 0 应进入黑屏") };
+        assert!((until - 15.0).abs() < 0.001);
+
+        let (state, caption) = finale(Finale::Black { until }, &ready, 14.9, true);
+        assert_eq!((state, caption), (Finale::Black { until }, FinaleCaption::Black));
+        let (state, caption) = finale(Finale::Black { until }, &ready, 15.0, true);
         assert_eq!((state, caption), (Finale::Done, FinaleCaption::None));
 
+        let (state, caption) = finale(Finale::Done, &ready, 20.0, true);
+        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "到点之后同一天不再补播");
+
         let (state, caption) = finale(Finale::Done, &counting(30), 20.0, true);
-        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "同一天不再重播");
+        assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::Seconds(30)), "下班时间改晚后重新倒计时");
+        let (state, caption) = finale(Finale::Done, &counting(120), 20.0, true);
+        assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "改晚超过一分钟先回到岛上的数字");
+        let (state, caption) = finale(Finale::Black { until: 30.0 }, &counting(90), 20.0, true);
+        assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "黑屏期间改晚也立刻开始新的一轮");
 
         let (state, caption) = step_finale(Finale::Done, "2026-11-19", "2026-11-20", &counting(8 * 3600), 0.0, true);
         assert_eq!((state, caption), (Finale::Idle, FinaleCaption::None), "第二天重新开始");
@@ -938,7 +1013,7 @@ mod tests {
         let (state, caption) = finale(Finale::Seconds, &counting(8), 10.0, false);
         assert_eq!((state, caption), (Finale::Seconds, FinaleCaption::None));
         let (state, caption) = finale(state, &ready, 11.0, false);
-        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "被挡住直到结束就不再补 GOGOGO");
+        assert_eq!((state, caption), (Finale::Done, FinaleCaption::None), "被挡住直到结束就不再补黑屏");
         let (state, caption) = finale(state, &ready, 12.0, true);
         assert_eq!(caption, FinaleCaption::None);
     }

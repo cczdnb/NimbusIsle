@@ -6,6 +6,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const USAGE_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+const SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
 
 pub fn db_path() -> Option<PathBuf> {
     let roaming = std::env::var_os("APPDATA").map(PathBuf::from)?;
@@ -33,32 +34,82 @@ pub fn connect(config: &mut Config, alias: &str) -> Result<(), String> {
 }
 
 pub fn fetch(agent: &ureq::Agent, account: &Account) -> Result<Snapshot, (String, u64)> {
-    let session = read_session(&account.source).map_err(|error| (error, 60))?;
-    if session.token.is_empty() { return Err(("请先在 Cursor 中登录".into(), 0)); }
+    let session = read_session(&account.source).map_err(|error| (format!("读取登录：{error}"), 60))?;
+    if session.token.is_empty() { return Err(("读取登录：库里没有 accessToken".into(), 0)); }
+    let primary = usage_rpc(agent, &session.token);
+    if let Ok(value) = &primary {
+        if let Ok(snapshot) = parse(&with_plan(value.clone(), session.plan.as_deref())) { return Ok(snapshot); }
+    }
+    let summary = usage_summary(agent, &session);
+    if let Ok(snapshot) = summary { return Ok(snapshot); }
+    let first = match &primary {
+        Ok(value) => format!("用量接口：{}", parse(&with_plan(value.clone(), session.plan.as_deref())).unwrap_err()),
+        Err((message, _)) => message.clone(),
+    };
+    let second = match summary { Err((message, _)) => message, Ok(_) => String::new() };
+    Err((format!("{first}；{second}"), 60))
+}
+
+fn usage_rpc(agent: &ureq::Agent, token: &str) -> Result<Value, (String, u64)> {
     let response = agent.post(USAGE_URL)
-        .set("Authorization", &format!("Bearer {}", session.token))
+        .set("Authorization", &format!("Bearer {token}"))
         .set("Content-Type", "application/json")
         .set("Connect-Protocol-Version", "1")
         .set("Accept", "application/json")
         .send_string("{}")
         .map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => rejected(&session.token),
-            ureq::Error::Status(429, response) => ("请求过于频繁，稍后自动重试".into(), response.header("Retry-After").and_then(|value| value.parse().ok()).unwrap_or(180).clamp(30, 3600)),
-            ureq::Error::Status(_, _) => ("暂时读不到套餐额度".into(), 60),
-            _ => ("无法连接 Cursor 额度服务，请检查网络或代理".into(), 30),
+            ureq::Error::Status(code @ (401 | 403), response) => {
+                let (reason, wait) = rejected(token);
+                (format!("用量接口 HTTP {code}：{reason}{}", brief_error(&response_text(response))), wait)
+            }
+            ureq::Error::Status(429, response) => ("用量接口 HTTP 429：请求过于频繁，稍后自动重试".into(), response.header("Retry-After").and_then(|value| value.parse().ok()).unwrap_or(180).clamp(30, 3600)),
+            ureq::Error::Status(code, response) => (format!("用量接口 HTTP {code}{}", brief_error(&response_text(response))), 60),
+            _ => ("用量接口：连不上 api2.cursor.sh".into(), 30),
         })?;
+    read_json(response).map_err(|error| (format!("用量接口：{error}"), 60))
+}
+
+/// 团队席和旧仪表盘没有 `planUsage`。改用网页同一条用量摘要，登录态用本机会话拼出来。
+fn usage_summary(agent: &ureq::Agent, session: &Session) -> Result<Snapshot, (String, u64)> {
+    let Some(cookie) = session_cookie(cookie_token(session)) else {
+        return Err(("用量摘要：登录令牌里没有用户编号".into(), 60));
+    };
+    let response = agent.get(SUMMARY_URL).set("Accept", "application/json").set("Cookie", &cookie).call().map_err(|error| match error {
+        ureq::Error::Status(code, response) => (format!("用量摘要 HTTP {code}{}", brief_error(&response_text(response))), 60),
+        _ => ("用量摘要：连不上 cursor.com".into(), 30),
+    })?;
+    let value = read_json(response).map_err(|error| (format!("用量摘要：{error}"), 60))?;
+    parse(&with_plan(value, session.plan.as_deref())).map_err(|error| (format!("用量摘要：{error}"), 60))
+}
+
+fn read_json(response: ureq::Response) -> Result<Value, String> {
+    let body = response_text(response);
+    serde_json::from_str(&body).map_err(|_| "返回的不是 JSON".into())
+}
+
+fn response_text(response: ureq::Response) -> String {
     let mut body = String::new();
-    response.into_reader().take(1024 * 1024).read_to_string(&mut body).map_err(|_| ("读取额度响应失败".into(), 30))?;
-    let mut value: Value = serde_json::from_str(&body).map_err(|_| ("暂时读不到套餐额度".into(), 60))?;
+    let _ = response.into_reader().take(4096).read_to_string(&mut body);
+    body
+}
+
+fn brief_error(body: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(body) else { return String::new(); };
+    let text = value.get("error").or_else(|| value.get("message")).and_then(Value::as_str).unwrap_or("");
+    let text: String = text.chars().filter(|ch| !ch.is_control()).take(48).collect();
+    if text.len() < 2 || text.contains("eyJ") { return String::new(); }
+    format!("，{text}")
+}
+
+fn with_plan(mut value: Value, plan: Option<&str>) -> Value {
     if value.get("membershipType").and_then(Value::as_str).is_none_or(str::is_empty) {
-        if let Some(plan) = session.plan { value["membershipType"] = Value::String(plan); }
+        if let Some(plan) = plan.filter(|plan| !plan.is_empty()) { value["membershipType"] = Value::String(plan.to_owned()); }
     }
-    parse(&value).map_err(|error| (error, 60))
+    value
 }
 
 pub fn parse(value: &Value) -> Result<Snapshot, String> {
-    let usage = &value["planUsage"];
-    if !usage.is_object() { return Err("暂时读不到套餐额度".into()); }
+    let Some(usage) = usage_bucket(value) else { return Err(format!("返回里没有套餐字段（{}）", field_names(value))); };
     let reset = cycle_end(value);
     let mut windows = Vec::new();
     if let Some(used) = percent(&usage["autoPercentUsed"]) {
@@ -67,8 +118,42 @@ pub fn parse(value: &Value) -> Result<Snapshot, String> {
     if let Some(used) = percent(&usage["apiPercentUsed"]) {
         windows.push(pool("其他模型", used, reset));
     }
-    if windows.is_empty() { return Err("暂时读不到套餐额度".into()); }
+    if windows.is_empty() {
+        if let Some(used) = percent(&usage["totalPercentUsed"]) {
+            windows.push(pool("套餐", used, reset));
+        } else if let Some(used) = ratio_percent(usage) {
+            windows.push(pool("套餐", used, reset));
+        }
+    }
+    if windows.is_empty() { return Err(format!("套餐字段里没有百分比（{}）", field_names(usage))); }
     Ok(Snapshot { plan: plan_name(value["membershipType"].as_str().unwrap_or("")), windows, at: chrono::Utc::now().timestamp(), ..Default::default() })
+}
+
+fn field_names(value: &Value) -> String {
+    let Some(object) = value.as_object() else { return if value.is_null() { "空".into() } else { "不是对象".into() }; };
+    let mut names: Vec<&str> = object.keys().map(String::as_str).filter(|key| !key.to_ascii_lowercase().contains("token")).take(8).collect();
+    if names.is_empty() { return "没有字段".into(); }
+    names.sort_unstable();
+    names.join(", ")
+}
+
+fn usage_bucket(value: &Value) -> Option<&Value> {
+    let plan = &value["planUsage"];
+    if plan.is_object() { return Some(plan); }
+    let individual = &value["individualUsage"];
+    if individual["plan"].is_object() { return Some(&individual["plan"]); }
+    if individual["overall"].is_object() { return Some(&individual["overall"]); }
+    None
+}
+
+fn ratio_percent(usage: &Value) -> Option<f32> {
+    let used = usage.get("used").and_then(number)?;
+    let limit = usage.get("limit").and_then(number).filter(|limit| *limit > 0.0)?;
+    Some((used / limit * 100.0).clamp(0.0, 100.0) as f32)
+}
+
+fn number(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| value.as_str()?.parse().ok()).filter(|number| number.is_finite() && *number >= 0.0)
 }
 
 fn pool(label: &str, used: f32, reset: Option<i64>) -> Window {
@@ -102,7 +187,32 @@ fn cycle_end(value: &Value) -> Option<i64> {
     raw.as_str().and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok().map(|time| time.timestamp()))
 }
 
-struct Session { token: String, email: Option<String>, plan: Option<String> }
+struct Session { token: String, refresh: String, email: Option<String>, plan: Option<String> }
+
+fn cookie_token(session: &Session) -> &str {
+    if jwt_text(&session.refresh, "type").as_deref() == Some("session") && jwt_text(&session.token, "type").as_deref() != Some("session") {
+        &session.refresh
+    } else {
+        &session.token
+    }
+}
+
+fn session_cookie(token: &str) -> Option<String> {
+    let sub = jwt_text(token, "sub")?;
+    let user = workos_user(&sub);
+    if user.is_empty() || token.is_empty() { return None; }
+    Some(format!("WorkosCursorSessionToken={user}%3A%3A{token}"))
+}
+
+fn workos_user(sub: &str) -> &str {
+    sub.rfind("user_").map(|index| &sub[index..]).filter(|user| !user.is_empty()).unwrap_or(sub)
+}
+
+fn jwt_text(token: &str, key: &str) -> Option<String> {
+    let payload = token.split('.').nth(1)?;
+    let bytes = b64url(payload)?;
+    serde_json::from_slice::<Value>(&bytes).ok()?.get(key)?.as_str().map(str::to_owned)
+}
 
 /// 接口拒绝时，先看本机令牌是否还在有效期内。没过期就不要提示去重新登录。
 fn rejected(token: &str) -> (String, u64) {
@@ -151,9 +261,10 @@ fn b64url(input: &str) -> Option<Vec<u8>> {
 fn read_session(path: &Path) -> Result<Session, String> {
     if !path.is_file() { return Err("未找到本机 Cursor".into()); }
     let token = item(path, "cursorAuth/accessToken")?;
+    let refresh = item(path, "cursorAuth/refreshToken").unwrap_or_default();
     let email = item(path, "cursorAuth/cachedEmail").ok().filter(|value| !value.is_empty());
     let plan = item(path, "cursorAuth/stripeMembershipType").ok().filter(|value| !value.is_empty());
-    Ok(Session { token, email, plan })
+    Ok(Session { token, refresh, email, plan })
 }
 
 fn plain(raw: &str) -> String {
@@ -176,6 +287,7 @@ mod sqlite {
     use std::os::raw::{c_char, c_int, c_void};
     use std::path::Path;
     const OPEN_READONLY: c_int = 1;
+    const OPEN_URI: c_int = 0x40;
     const ROW: c_int = 100;
     #[link(name = "winsqlite3")]
     extern "system" {
@@ -190,9 +302,20 @@ mod sqlite {
     struct Db(*mut c_void);
     impl Drop for Db { fn drop(&mut self) { if !self.0.is_null() { unsafe { sqlite3_close(self.0); } } } }
     pub fn text(path: &Path, sql: &str) -> Result<String, String> {
-        let name = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "路径无效".to_string())?;
+        match query(path, sql, None) {
+            Err(error) if error.contains("正在使用") => query(path, sql, uri_name(path)).or(Err(error)),
+            other => other,
+        }
+    }
+    fn query(path: &Path, sql: &str, uri: Option<CString>) -> Result<String, String> {
+        let owned;
+        let name = if let Some(uri) = uri.as_ref() { uri } else {
+            owned = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "路径无效".to_string())?;
+            &owned
+        };
+        let flags = if uri.is_some() { OPEN_READONLY | OPEN_URI } else { OPEN_READONLY };
         let mut db = std::ptr::null_mut();
-        let rc = unsafe { sqlite3_open_v2(name.as_ptr(), &mut db, OPEN_READONLY, std::ptr::null()) };
+        let rc = unsafe { sqlite3_open_v2(name.as_ptr(), &mut db, flags, std::ptr::null()) };
         if rc != 0 || db.is_null() {
             if !db.is_null() { unsafe { sqlite3_close(db); } }
             return Err(sqlite_error(rc));
@@ -218,6 +341,19 @@ mod sqlite {
     }
     fn sqlite_error(code: c_int) -> String {
         if code == 5 || code == 6 { "Cursor 正在使用登录数据，稍后再试".into() } else { "暂时读不到 Cursor 的登录状态".into() }
+    }
+    fn uri_name(path: &Path) -> Option<CString> {
+        let text = path.to_string_lossy();
+        let text = text.trim_start_matches(r"\\?\");
+        let mut encoded = String::from("file:");
+        for byte in text.replace('\\', "/").bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b':' | b'.' | b'_' | b'-' => encoded.push(byte as char),
+                _ => encoded.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        encoded.push_str("?mode=ro&nolock=1");
+        CString::new(encoded).ok()
     }
 }
 
@@ -256,8 +392,42 @@ mod tests {
         assert_eq!(snapshot.windows.len(), 1);
         assert_eq!(snapshot.windows[0].label, "Cursor 模型");
         value["planUsage"]["autoPercentUsed"] = Value::Null;
+        value["planUsage"]["totalPercentUsed"] = Value::Null;
         assert!(parse(&value).is_err());
+        let team = parse(&serde_json::json!({"billingCycleEnd":"2026-05-02T00:00:00Z","spendLimitUsage":{"limitType":"team"}})).unwrap_err();
+        assert!(team.contains("没有套餐字段") && team.contains("billingCycleEnd") && team.contains("spendLimitUsage"), "{team}");
         assert!(parse(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn team_summary_uses_the_personal_plan_pools() {
+        let snapshot = parse(&serde_json::json!({
+            "membershipType": "enterprise",
+            "billingCycleEnd": "2026-05-02T14:11:55.000Z",
+            "individualUsage": { "plan": { "autoPercentUsed": 0, "apiPercentUsed": 100, "totalPercentUsed": 100 } }
+        })).unwrap();
+        assert_eq!(snapshot.plan, "Enterprise");
+        assert_eq!(snapshot.windows.len(), 2);
+        assert!((snapshot.windows[0].remaining - 100.0).abs() < 0.01);
+        assert!((snapshot.windows[1].remaining - 0.0).abs() < 0.01);
+        let overall = parse(&serde_json::json!({
+            "membershipType": "team",
+            "individualUsage": { "overall": { "used": 25, "limit": 100 } }
+        })).unwrap();
+        assert_eq!(overall.plan, "Business");
+        assert_eq!(overall.windows[0].label, "套餐");
+        assert!((overall.windows[0].remaining - 75.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn session_cookie_uses_the_user_id_inside_the_subject() {
+        let header = "eyJhbGciOiJub25lIn0";
+        let payload = b64url_test(br#"{"sub":"auth0|user_01TEST","exp":4102444800,"type":"session"}"#);
+        let token = format!("{header}.{payload}.sig");
+        let cookie = session_cookie(&token).unwrap();
+        assert!(cookie.starts_with("WorkosCursorSessionToken=user_01TEST%3A%3A"));
+        assert!(cookie.ends_with(&token));
+        assert!(!cookie.contains("auth0|"));
     }
 
     #[test]

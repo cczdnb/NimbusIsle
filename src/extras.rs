@@ -410,6 +410,17 @@ impl App {
         self.notice=Some(Alert{source,title:unread.source.name().into(),body:body.into(),page:usize::MAX,at:self.t,duration:dwell,bluetooth:None,meeting:None,unread:Some(unread)});
         self.notification_bell_at=self.t;self.notification_bell_until=self.t+dwell;
     }
+    /// 读秒卡片和全屏倒数占着画面时，提醒先留着，不计时。
+    pub(crate) fn hold_notices_for_countdown(&mut self) {
+        if !self.offwork_finale_showing() && !self.offwork_cover() { return; }
+        let dt = self.dt as f64;
+        if dt <= 0.0 { return; }
+        if let Some(a) = self.notice.as_mut() { a.at += dt; }
+        if self.notification_bell_until > self.t - dt {
+            self.notification_bell_until += dt;
+            self.notification_bell_at += dt;
+        }
+    }
     pub(crate) fn tick_alerts(&mut self) {
         self.pending_messengers.retain(|u|u.source.enabled(&self.settings) && (u.source.adapter().capture!=crate::messenger::Capture::SystemToast
             || self.notification_apps.items.iter().any(|(key,_,on)|key==u.source.adapter().notification_id && *on)));
